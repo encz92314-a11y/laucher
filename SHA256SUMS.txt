@@ -1,2 +1,9 @@
+b83c988db96263507996b4c9208032f7cbfd35432397805864bcf4965f2b09c7  EasyTier-main.zip
+188b45def242a2609ecfd77b79b4e3d74f354b4b8f8db154027a0e43ee40666f  Terracotta-master.zip
+cc12b3f4b5c898df71fbc4e74797f1661afa3cc7929fe631fbcdba829b5a2ade  e4mc-source-93ce8a8e6cd4.zip
+04afe5305307d1f0dcc978ecbeb58cf0aee495cec7e85ebcfd2212b0320bab27  minecraft-launcher-0.1.0-source.zip
 10b5d80593904148708178134db181919147e95b4433e3a96d26f366964121c9  minecraft-launcher-0.1.1-macos-arm64.zip
 933e4179c65162e9eee4b8049e1941ef8729b57c575c0b775af4fc411c8c3d99  minecraft-launcher-0.1.1-macos-x64.zip
+2c54c10a154164e1239dc56bf73df67ae2e88363fee57366fbd5a5a38c10010f  minecraft-launcher-0.1.1-source.zip
+89670c237634ecefc53fe6e69c26bf15a1fce5f73b4bcc6386ba6553fb5c7f17  minecraft-launcher-0.1.1-x86_64.AppImage
+23f5e524850e2840f229c2f98a8f3fbc4424279df5f4379da17fa9cbc4fbf5b2  minecraft-launcher-0.1.1-amd64.deb
