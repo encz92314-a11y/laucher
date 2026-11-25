@@ -70,7 +70,8 @@ test('installs through HTTP, rejects corruption and reuses verified downloads', 
   const [installed, other] = await service.install(id, value => progress.push(value));
   assert.equal(installed.installed, true);
   assert.equal(other.installed, false);
-  assert.deepEqual(progress.at(-1), { completed: 2, total: 2 });
+  assert.equal(progress.at(-1).completed, 2);
+  assert.equal(progress.at(-1).total, 2);
   assert.equal(await readFile(join(directory, 'games', id, 'client.jar'), 'utf8'), 'valid client');
   const requestCount = requests.length;
   await service.install(id, () => {});

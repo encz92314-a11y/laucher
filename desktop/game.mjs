@@ -1,13 +1,15 @@
 import { spawn, execFile } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
-import { delimiter } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
 import { allowed, localPath } from './core.mjs';
 
+import { gameProfile, systemProfile } from './performance.mjs';
+
 const execute = promisify(execFile);
 
-export function launchArguments(version, game, account) {
+export function launchArguments(version, game, account, memory = 2, extra = []) {
   if (!version.arguments?.game || !version.arguments?.jvm ||
       version.libraries.some(lib => lib.natives && allowed(lib.rules))) {
     throw new Error('此版本需要旧版启动参数或原生库解包支持');
@@ -21,7 +23,7 @@ export function launchArguments(version, game, account) {
     auth_player_name: account.name, auth_uuid: account.id, auth_access_token: account.access,
     version_name: version.id, game_directory: game, assets_root: assets,
     assets_index_name: version.assetIndex.id, user_type: 'msa', version_type: version.type,
-    auth_xuid: '', clientid: '', launcher_name: 'Java Edition Launcher', launcher_version: '0.1.1',
+    auth_xuid: '', clientid: '', launcher_name: 'Java Edition Launcher', launcher_version: '0.2.0',
     natives_directory: localPath(game, 'natives'), classpath: classpath.join(delimiter),
     library_directory: libraries, classpath_separator: delimiter,
   };
@@ -33,7 +35,8 @@ export function launchArguments(version, game, account) {
     }));
   const logging = version.logging?.client;
   return [
-    '-Xmx2G',
+    `-Xmx${memory}G`,
+    ...extra,
     ...expand(version.arguments.jvm),
     ...(logging ? [logging.argument.replace('${path}', localPath(game, `log_configs/${logging.file.id}`))] : []),
     version.mainClass,
@@ -41,16 +44,35 @@ export function launchArguments(version, game, account) {
   ];
 }
 
-export async function launchGame(game, account, loader) {
+export async function selectJava(major, { platform = process.platform, arch = process.arch, run = execute,
+  configured = process.env.MINECRAFT_JAVA } = {}) {
+  const candidates = configured ? [configured] : [];
+  if (!configured && platform === 'darwin') {
+    const home = await run('/usr/libexec/java_home', ['-F', '-a', arch === 'arm64' ? 'arm64' : 'x86_64', '-v', String(major)],
+      { timeout: 8000 }).then(result => result.stdout.trim(), () => '');
+    if (home) candidates.push(join(home, 'bin', 'java'));
+  }
+  if (!configured) candidates.push('java');
+  for (const java of candidates) {
+    const result = await run(java, ['-XshowSettings:properties', '-version'], { timeout: 8000, windowsHide: true })
+      .catch(() => null);
+    if (!result) continue;
+    const output = result.stderr + result.stdout;
+    const version = /version "(?:1\.)?(\d+)/.exec(output)?.[1];
+    const javaArch = /os\.arch\s*=\s*(\S+)/.exec(output)?.[1];
+    if (Number(version) !== major) continue;
+    if (platform === 'darwin' && arch === 'arm64' && !['aarch64', 'arm64'].includes(javaArch)) continue;
+    return java;
+  }
+  throw new Error(`找不到兼容的 Java ${major}${platform === 'darwin' && arch === 'arm64' ? '（Apple 芯片 ARM64）' : ''}。请安装对应版本，或配置 MINECRAFT_JAVA。`);
+}
+
+export async function launchGame(game, account, loader, preset) {
   if (!account || account.expires <= Date.now()) throw new Error('请先登录拥有 Minecraft Java 版的 Microsoft 账号');
   const version = JSON.parse(await readFile(localPath(game, loader === 'fabric' ? 'fabric.json' : 'version.json'), 'utf8'));
-  const java = process.env.MINECRAFT_JAVA ?? 'java';
-  const result = await execute(java, ['-version'], { timeout: 8000, windowsHide: true })
-    .catch(() => { throw new Error('找不到 Java，请配置 MINECRAFT_JAVA 或将 Java 加入 PATH'); });
-  const match = /version "(?:1\.)?(\d+)/.exec(result.stderr + result.stdout);
-  const required = version.javaVersion?.majorVersion ?? 8;
-  if (!match || Number(match[1]) !== required) throw new Error(`此实例需要 Java ${required}`);
-  const args = launchArguments(version, game, account);
+  const java = await selectJava(version.javaVersion?.majorVersion ?? 8);
+  const extra = loader === 'fabric' ? await gameProfile(game, preset) : [];
+  const args = launchArguments(version, game, account, systemProfile().memory, extra);
   await mkdir(localPath(game, 'natives'), { recursive: true });
   const child = spawn(java, args, { cwd: game, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   const log = createWriteStream(localPath(game, 'launcher-game.log'), { flags: 'w', mode: 0o600 });

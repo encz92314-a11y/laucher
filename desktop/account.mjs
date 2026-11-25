@@ -49,7 +49,9 @@ export async function minecraftIdentity(microsoftToken, request = json) {
   if (!entitlements.items?.some(item => javaOwnership.has(item.name))) throw new Error('此账号未通过 Minecraft Java 版所有权验证');
   const profile = await request(minecraft + '/minecraft/profile', { access });
   if (!/^[a-f0-9]{32}$/i.test(profile.id ?? '') || !profile.name) throw new Error('账号缺少有效的 Java 版玩家资料');
+  const skin = profile.skins?.find(entry => entry.state === 'ACTIVE')?.url;
   return {
+    skin: /^https:\/\/textures\.minecraft\.net\/texture\/[a-f0-9]+$/i.test(skin ?? '') ? skin : undefined,
     id: profile.id, name: profile.name, access, expires: Date.now() + game.expires_in * 1000,
   };
 }

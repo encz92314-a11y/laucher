@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 
 type Bridge = Window['launcher'];
 
-export function Resources({ instance, disabled }: { instance: string; disabled: boolean }) {
+export function Resources({ instance, disabled, notify }: { instance: string; disabled: boolean; notify: (active: boolean) => void }) {
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<Awaited<ReturnType<Bridge['searchMods']>>>();
   const [plan, setPlan] = useState<Awaited<ReturnType<Bridge['previewMod']>>>();
@@ -14,6 +14,7 @@ export function Resources({ instance, disabled }: { instance: string; disabled: 
 
   async function run(action: () => Promise<void>) {
     setWorking(true);
+    notify(true);
     setError('');
     setMessage('');
     try {
@@ -22,6 +23,7 @@ export function Resources({ instance, disabled }: { instance: string; disabled: 
       setError(String(error));
     } finally {
       setWorking(false);
+      notify(false);
     }
   }
 

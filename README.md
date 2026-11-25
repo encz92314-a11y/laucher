@@ -46,8 +46,17 @@ npm start
 
 ## 验证和剩余范围
 
-- 7 项自动化测试覆盖路径限制、平台规则、HTTP 安装及损坏文件校验、正版所有权、启动参数、Fabric 配置继承和 Modrinth 依赖校验。TypeScript 检查和前端生产构建通过。
+- 11 项自动化测试覆盖路径限制、平台规则、HTTP 安装及损坏文件校验、正版所有权、启动参数、Fabric 配置继承和 Modrinth 依赖校验。TypeScript 检查和前端生产构建通过。
 - 云机代理拒绝访问 Mojang、Fabric Meta、Fabric Maven 和 Modrinth。缺少已获授权的 Microsoft 客户端 ID 和正版测试账号，真实下载、登录及游戏内验收待完成。
 - Linux 上使用 Electron 无头模式完成了窗口渲染、预加载通信、空实例列表及渲染进程隔离的冒烟测试。Windows、macOS 和游戏内测试仍待完成。
-- 待实现：Forge / NeoForge / Quilt、Java 自动安装、可持久化多账号和自动刷新、CurseForge、整合包安装、完整性能预设、Terracotta 与 e4mc 联机状态和跨地区验收、模组同步、备份恢复、日志诊断、辅助模组、主题语言设置和签名更新。
+- 待实现：Forge / NeoForge / Quilt、Java 自动安装、可持久化多账号和自动刷新、CurseForge、整合包安装、Terracotta 与 e4mc 联机状态和跨地区验收、模组同步、备份恢复、日志诊断、辅助模组、主题语言设置和签名更新。
 - 联机源码仅作为后续参考。陶瓦采用 AGPL-3.0-or-later 并有针对未经修改二进制与进程间接口的例外。e4mc 和 Sodium 由用户确认后从 Modrinth 下载，EasyTier 尚未集成。Electron、React 及构建工具版本见锁文件。
+
+## 0.2.0 性能与界面
+
+- 新增深色、浅色和系统主题、macOS 原生背景材质、网页层模糊和低性能设备动效降级。Z 图标根据供稿外观重绘。
+- 极速、平衡、画质预设只用于 Fabric。安装前显示检测到的版本、必需依赖及跳过原因。选择平衡或画质后可使用自己放入的 Iris 光影 ZIP。启动器按预设设置渲染距离和模拟距离，保留游戏分辨率。手动模式停用预设目录及参数，保留磁盘和现有游戏设置。
+- Apple Silicon 优先自动查找原生 ARM64 Java，检查真实 Java 版本和架构。自动分配内存上限为系统内存约 40%，限制在 1–8 GB。
+- 下载支持校验缓存和基于 Range 的恢复。服务器不支持 Range 时重新下载该文件。进度显示为已处理的文件数和任务平均吞吐。
+- 新版发布由版本标签触发，目标为 macOS ARM64 DMG、Windows x64 EXE 和 Linux x64 AppImage。macOS 预览包使用临时签名。Developer ID 签名和 Apple 公证需要发布账号及对应凭据。
+- 模组兼容性依据 Modrinth 的版本、加载器与声明的依赖和冲突。未测游戏实机帧率；第三方光影和手动安装的模组需在实际游戏中验证。

@@ -13,13 +13,13 @@ const trustedHosts = new Set([
   'launcher.mojang.com', 'meta.fabricmc.net', 'maven.fabricmc.net', 'api.modrinth.com', 'cdn.modrinth.com', 'libraries.minecraft.net', 'resources.download.minecraft.net',
 ]);
 
-export async function officialFetch(url) {
+export async function officialFetch(url, headers = {}) {
   const address = new URL(url);
   if (address.protocol !== 'https:' || address.username || address.password ||
       address.port || !trustedHosts.has(address.hostname)) {
     throw new Error('下载地址不属于受信任的资源服务器');
   }
-  const response = await fetch(address, { redirect: 'error', headers: { 'User-Agent': 'JavaEditionLauncher/0.1.1' }, signal: AbortSignal.timeout(120_000) });
+  const response = await fetch(address, { redirect: 'error', headers: { 'User-Agent': 'JavaEditionLauncher/0.2.0', ...headers }, signal: AbortSignal.timeout(120_000) });
   if (!response.ok) throw new Error(`资源请求失败（HTTP ${response.status}）`);
   return response;
 }
@@ -72,32 +72,44 @@ async function existingMatches(path, descriptor) {
   return hash.digest('hex') === descriptor.sha1;
 }
 
-export async function verifiedDownload(path, descriptor, request = officialFetch) {
-  if (!/^[a-f0-9]{40}$/.test(descriptor.sha1 ?? '')) throw new Error('官方元数据缺少有效 SHA-1');
+export async function verifiedDownload(path, descriptor, request = officialFetch, onBytes = () => {}) {
+  if (!/^[a-f0-9]{40}$/.test(descriptor.sha1 ?? '')) throw new Error('资源元数据缺少有效 SHA-1');
   if (await existingMatches(path, descriptor)) return;
-  const response = await request(descriptor.url);
+  const temporary = path + '.' + descriptor.sha1 + '.part';
   await mkdir(dirname(path), { recursive: true });
-  const temporary = path + '.' + randomUUID() + '.part';
-  const hash = createHash('sha1');
-  let bytes = 0;
-  try {
-    await pipeline(Readable.fromWeb(response.body), new Transform({
-      transform(chunk, _, done) {
-        bytes += chunk.length;
-        if (descriptor.size !== undefined && bytes > descriptor.size) {
-          done(new Error('下载文件超过预期大小'));
-          return;
-        }
-        hash.update(chunk);
-        done(null, chunk);
-      },
-    }), createWriteStream(temporary, { flags: 'wx' }));
-    if (hash.digest('hex') !== descriptor.sha1 ||
-        (descriptor.size !== undefined && bytes !== descriptor.size)) throw new Error('文件完整性校验失败');
-    await rename(temporary, path);
-  } finally {
-    await rm(temporary, { force: true });
+  const info = await stat(temporary).catch(error => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  let offset = descriptor.size && info?.isFile() && info.size < descriptor.size ? info.size : 0;
+  const response = await request(descriptor.url, offset ? { Range: `bytes=${offset}-` } : {});
+  if (response.status === 206) {
+    const expected = `bytes ${offset}-${descriptor.size - 1}/${descriptor.size}`;
+    if (!offset || response.headers.get('content-range') !== expected) {
+      await response.body?.cancel();
+      await rm(temporary, { force: true });
+      throw new Error('服务器返回的续传范围无效');
+    }
+  } else {
+    offset = 0;
   }
+  let bytes = offset;
+  await pipeline(Readable.fromWeb(response.body), new Transform({
+    transform(chunk, _, done) {
+      bytes += chunk.length;
+      if (descriptor.size !== undefined && bytes > descriptor.size) {
+        done(new Error('下载文件超过预期大小'));
+        return;
+      }
+      onBytes(chunk.length);
+      done(null, chunk);
+    },
+  }), createWriteStream(temporary, { flags: offset ? 'a' : 'w' }));
+  if (!(await existingMatches(temporary, descriptor))) {
+    await rm(temporary, { force: true });
+    throw new Error('文件完整性校验失败');
+  }
+  await rename(temporary, path);
 }
 
 export function launcher(root, request = officialFetch) {
@@ -186,15 +198,24 @@ export function launcher(root, request = officialFetch) {
         const queue = files.entries();
         let completed = 0;
         let failure;
-        progress({ completed, total: files.size });
+        let bytes = 0;
+        let last = 0;
+        const started = Date.now();
+        const report = () => progress({ completed, total: files.size,
+          bytesPerSecond: bytes * 1000 / Math.max(1, Date.now() - started) });
+        report();
         await Promise.all(Array.from({ length: 6 }, async () => {
           while (!failure) {
             const next = queue.next();
             if (next.done) return;
             const [path, descriptor] = next.value;
             try {
-              await verifiedDownload(path, descriptor, request);
-              progress({ completed: ++completed, total: files.size });
+              await verifiedDownload(path, descriptor, request, count => {
+                bytes += count;
+                if (Date.now() - last > 250) { last = Date.now(); report(); }
+              });
+              completed++;
+              if (completed === files.size || Date.now() - last > 250) { last = Date.now(); report(); }
             } catch (error) {
               failure ??= error;
             }

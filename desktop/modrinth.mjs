@@ -1,5 +1,5 @@
 import { mkdir, readdir, rename, rm } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+
 import { localPath, officialFetch, verifiedDownload } from './core.mjs';
 
 const api = 'https://api.modrinth.com/v2';
@@ -16,7 +16,7 @@ export function modrinth(request = officialFetch) {
     const query = new URLSearchParams({ loaders: '["fabric"]', game_versions: JSON.stringify([game]) });
     const versions = await json('/project/' + identifier(project) + '/version?' + query);
     const result = versions.find(item => item.version_type === 'release' && compatible(item, game));
-    if (!result) throw new Error(`资源 ${project} 没有适用的 Fabric 正式版`);
+    if (!result) throw Object.assign(new Error(`资源 ${project} 没有适用的 Fabric 正式版`), { code: 'NO_COMPATIBLE_VERSION' });
     return result;
   }
   return {
@@ -69,13 +69,23 @@ export function modrinth(request = officialFetch) {
       }
       return plan;
     },
-    async install(plan, gameDirectory) {
-      const transaction = localPath(gameDirectory, 'mod-download-' + randomUUID());
+    async install(plan, gameDirectory, report = () => {}) {
+      const transaction = localPath(gameDirectory, 'mod-downloads');
       const staged = [];
       const committed = [];
       const mods = localPath(gameDirectory, 'mods');
       await mkdir(mods, { recursive: true });
       const siblings = await readdir(mods);
+      let completed = 0;
+      let bytes = 0;
+      const started = Date.now();
+      const progress = () => report({ completed, total: plan.length, bytesPerSecond: bytes * 1000 / Math.max(1, Date.now() - started) });
+      let last = 0;
+      const onBytes = count => {
+        bytes += count;
+        if (Date.now() - last > 250) { last = Date.now(); progress(); }
+      };
+      progress();
       try {
         for (const file of plan) {
           const id = identifier(file.project);
@@ -90,11 +100,15 @@ export function modrinth(request = officialFetch) {
             throw new Error(`已安装 ${file.title} 的另一个版本`);
           }
           if (siblings.includes(name)) {
-            await verifiedDownload(target, file, request);
+            await verifiedDownload(target, file, request, onBytes);
+            completed++;
+            progress();
             continue;
           }
           const source = localPath(transaction, name);
-          await verifiedDownload(source, file, request);
+          await verifiedDownload(source, file, request, onBytes);
+          completed++;
+          progress();
           staged.push({ source, target });
         }
         for (const { source, target } of staged) {
@@ -104,8 +118,6 @@ export function modrinth(request = officialFetch) {
       } catch (error) {
         await Promise.all(committed.map(path => rm(path, { force: true })));
         throw error;
-      } finally {
-        await rm(transaction, { recursive: true, force: true });
       }
       return plan.map(({ title, version }) => ({ title, version }));
     },

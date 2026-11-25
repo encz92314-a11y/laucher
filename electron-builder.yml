@@ -3,6 +3,7 @@ productName: Java Edition Launcher
 publish: null
 directories:
   output: release
+  buildResources: build
 files:
   - desktop/**
   - dist/**

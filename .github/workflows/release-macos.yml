@@ -1,4 +1,4 @@
-name: Publish macOS packages
+name: Publish desktop packages
 
 on:
   push:
@@ -9,10 +9,14 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-latest
     strategy:
+      fail-fast: false
       matrix:
-        arch: [arm64, x64]
+        include:
+          - { runner: macos-latest, target: '--mac dmg --arm64', id: macos-arm64, extension: dmg }
+          - { runner: windows-latest, target: '--win nsis --x64', id: windows-x64, extension: exe }
+          - { runner: ubuntu-latest, target: '--linux AppImage --x64', id: linux-x64, extension: AppImage }
+    runs-on: ${{ matrix.runner }}
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
@@ -23,20 +27,35 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - name: Build disk image
+      - name: Build package
         shell: bash
         run: |
+          set -euo pipefail
           version="$(node -p 'require("./package.json").version')"
           test "$GITHUB_REF_NAME" = "v$version"
-          npm run package -- --mac dmg --${{ matrix.arch }}
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            npm run package -- ${{ matrix.target }} --config.mac.identity=-
+          else
+            npm run package -- ${{ matrix.target }}
+          fi
           mkdir -p downloads
-          images=(release/*.dmg)
-          test "${#images[@]}" -eq 1
-          mv "${images[0]}" "downloads/minecraft-launcher-${version}-macos-${{ matrix.arch }}.dmg"
+          files=(release/*.${{ matrix.extension }})
+          test "${#files[@]}" -eq 1
+          mv "${files[0]}" "downloads/minecraft-launcher-${version}-${{ matrix.id }}.${{ matrix.extension }}"
+      - name: Verify and start app on macOS ARM64
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="$(find release/mac-arm64 -maxdepth 1 -name '*.app' -print -quit)"
+          test -d "$bundle"
+          codesign --verify --deep --strict "$bundle"
+          lipo -verify_arch arm64 "$bundle/Contents/MacOS/Java Edition Launcher"
+          LAUNCHER_SMOKE_DIRECTORY="$RUNNER_TEMP" "$bundle/Contents/MacOS/Java Edition Launcher" --smoke-test
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ matrix.arch }}
-          path: downloads/*.dmg
+          name: desktop-${{ matrix.id }}
+          path: downloads/*
           if-no-files-found: error
   release:
     needs: build
@@ -48,15 +67,16 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: macos-*
+          pattern: desktop-*
           merge-multiple: true
           path: downloads
       - name: Publish prerelease
         shell: bash
         run: |
+          set -euo pipefail
           cd downloads
-          sha256sum *.dmg > SHA256SUMS.txt
+          sha256sum *.dmg *.exe *.AppImage > SHA256SUMS.txt
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "$GITHUB_REF_NAME macOS preview" \
-            --notes "macOS development preview for Apple Silicon and Intel. Developer ID signing and notarization are pending." \
-            *.dmg SHA256SUMS.txt
+            --title "$GITHUB_REF_NAME Desktop Preview" \
+            --notes "Includes macOS ARM64, Windows x64 and Linux x64. macOS Developer ID signing and notarization are pending." \
+            *.dmg *.exe *.AppImage SHA256SUMS.txt

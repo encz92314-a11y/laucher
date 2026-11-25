@@ -1,5 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('launcher', {
+  system: () => ipcRenderer.invoke('launcher:system'),
+  profile: id => ipcRenderer.invoke('launcher:profile', id),
+  previewProfile: (id, preset) => ipcRenderer.invoke('launcher:previewProfile', id, preset),
+  applyProfile: (id, token) => ipcRenderer.invoke('launcher:applyProfile', id, token),
+  shaders: id => ipcRenderer.invoke('launcher:shaders', id),
+  selectShader: (id, name) => ipcRenderer.invoke('launcher:selectShader', id, name),
+  shaderFolder: id => ipcRenderer.invoke('launcher:shaderFolder', id),
   list: () => ipcRenderer.invoke('launcher:list'),
   versions: () => ipcRenderer.invoke('launcher:versions'),
   create: (name, version, loader) => ipcRenderer.invoke('launcher:create', name, version, loader),
