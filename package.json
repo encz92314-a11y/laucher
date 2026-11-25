@@ -1,0 +1,30 @@
+{
+  "name": "minecraft-launcher",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.mjs",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "start": "electron .",
+    "test": "node --test",
+    "check": "npm run test && npm run build",
+    "package": "electron-builder --publish never"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.3",
+    "@types/react-dom": "^19.3.0",
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "description": "Desktop launcher for Minecraft Java Edition",
+  "author": "Launcher contributors",
+  "homepage": "https://www.minecraft.net/",
+  "desktopName": "org.launcher.minecraft.desktop"
+}

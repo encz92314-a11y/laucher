@@ -1,0 +1,24 @@
+appId: org.launcher.minecraft
+productName: Java Edition Launcher
+publish: null
+directories:
+  output: release
+files:
+  - desktop/**
+  - dist/**
+  - package.json
+win:
+  target:
+    - nsis
+    - portable
+mac:
+  target:
+    - dmg
+linux:
+  category: Game
+  artifactName: ${name}-${version}-${arch}.${ext}
+  maintainer: Launcher contributors <maintainer@example.invalid>
+  syncDesktopName: true
+  target:
+    - AppImage
+    - deb
