@@ -23,7 +23,7 @@ export function launchArguments(version, game, account, memory = 2, extra = []) 
     auth_player_name: account.name, auth_uuid: account.id, auth_access_token: account.access,
     version_name: version.id, game_directory: game, assets_root: assets,
     assets_index_name: version.assetIndex.id, user_type: 'msa', version_type: version.type,
-    auth_xuid: '', clientid: '', launcher_name: 'Java Edition Launcher', launcher_version: '0.2.0',
+    auth_xuid: '', clientid: '', launcher_name: 'Java Edition Launcher', launcher_version: '0.2.1',
     natives_directory: localPath(game, 'natives'), classpath: classpath.join(delimiter),
     library_directory: libraries, classpath_separator: delimiter,
   };
