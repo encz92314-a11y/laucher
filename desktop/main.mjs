@@ -31,6 +31,7 @@ app.on('second-instance', () => {
 
 function openWindow() {
   window = new BrowserWindow({
+    show: !process.argv.includes('--smoke-test'),
     width: 1120, height: 740, minWidth: 680, minHeight: 550,
     backgroundColor: process.platform === 'darwin' ? '#00000000' : '#181622', autoHideMenuBar: true,
     ...(process.platform === 'darwin' ? { vibrancy: 'under-window', titleBarStyle: 'hiddenInset' } : {}),

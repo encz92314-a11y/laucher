@@ -42,28 +42,36 @@ jobs:
           files=(release/*.${{ matrix.extension }})
           test "${#files[@]}" -eq 1
           mv "${files[0]}" "downloads/minecraft-launcher-${version}-${{ matrix.id }}.${{ matrix.extension }}"
-      - name: Verify and start app on macOS ARM64
+      - name: Mount packaged macOS disk image
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
-          mount="$(mktemp -d)"
-          profile="$(mktemp -d)"
+          mount="$RUNNER_TEMP/launcher-dmg"
+          mkdir -p "$mount"
           hdiutil attach -readonly -nobrowse -mountpoint "$mount" downloads/*.dmg
-          trap 'hdiutil detach "$mount"' EXIT
           bundle="$(find "$mount" -maxdepth 1 -type d -name '*.app' -print -quit)"
           test -n "$bundle"
-          {
-            echo '### macOS packaged application validation'
-            echo '```text'
-            codesign --verify --deep --strict --verbose=2 "$bundle"
-            executable=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$bundle/Contents/Info.plist")
-            lipo -archs "$bundle/Contents/MacOS/$executable"
-            lipo -verify_arch arm64 "$bundle/Contents/MacOS/$executable"
-            LAUNCHER_SMOKE_DIRECTORY="$profile" "$bundle/Contents/MacOS/$executable" --smoke-test
-            echo 'Electron renderer startup: passed'
-            echo '```'
-          } 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$bundle/Contents/Info.plist")
+          printf 'LAUNCHER_BUNDLE=%s\nLAUNCHER_EXECUTABLE=%s/Contents/MacOS/%s\n' "$bundle" "$bundle" "$executable" >> "$GITHUB_ENV"
+      - name: Check macOS app architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test "$(lipo -archs "$LAUNCHER_EXECUTABLE")" = arm64
+      - name: Verify macOS app signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: codesign --verify --deep --strict --verbose=2 "$LAUNCHER_BUNDLE"
+      - name: Start packaged macOS app
+        if: runner.os == 'macOS'
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          profile="$(mktemp -d)"
+          LAUNCHER_SMOKE_DIRECTORY="$profile" "$LAUNCHER_EXECUTABLE" --smoke-test --disable-gpu
+      - name: Detach macOS disk image
+        if: always() && runner.os == 'macOS' && env.LAUNCHER_BUNDLE != ''
+        run: hdiutil detach "$RUNNER_TEMP/launcher-dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.id }}
@@ -71,6 +79,7 @@ jobs:
           if-no-files-found: error
   release:
     needs: build
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,8 +96,15 @@ jobs:
         run: |
           set -euo pipefail
           cd downloads
-          sha256sum *.dmg *.exe *.AppImage > SHA256SUMS.txt
+          shopt -s nullglob
+          packages=(*.dmg *.exe *.AppImage)
+          test "${#packages[@]}" -gt 0
+          sha256sum "${packages[@]}" > SHA256SUMS.txt
+          printf '%s\n' 'Only packages that completed their build checks are included.' '' > notes.md
+          printf -- '- %s\n' "${packages[@]}" >> notes.md
+          if compgen -G '*.dmg' > /dev/null; then
+            printf '\n%s\n' 'macOS uses an ad-hoc signature. Developer ID signing and Apple notarization are pending.' >> notes.md
+          fi
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
-            --title "$GITHUB_REF_NAME Desktop Preview" \
-            --notes "Includes macOS ARM64, Windows x64 and Linux x64. macOS Developer ID signing and notarization are pending." \
-            *.dmg *.exe *.AppImage SHA256SUMS.txt
+            --title "$GITHUB_REF_NAME Desktop Preview" --notes-file notes.md \
+            "${packages[@]}" SHA256SUMS.txt
