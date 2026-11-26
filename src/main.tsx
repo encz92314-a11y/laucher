@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import type { Preset } from './profiles';
 const Resources = lazy(() => import('./resources').then(module => ({ default: module.Resources })));
 const Profiles = lazy(() => import('./profiles').then(module => ({ default: module.Profiles })));
-type Page = 'home' | 'instances' | 'performance' | 'mods';
+type Page = 'home' | 'instances' | 'performance' | 'mods' | 'account';
 const navigation = [
   ['home', '首页', 'M3 10l9-7 9 7v10H4V10m5 10v-7h6v7'],
   ['instances', '实例', 'M12 3l9 5v8l-9 5-9-5V8l9-5zm-9 5l9 5 9-5m-9 5v8'],
@@ -12,11 +12,13 @@ const navigation = [
   ['mods', '模组', 'M5 4h14v16H5zM8 8h8M8 12h8m-8 4h4'],
 ] as const;
 import './style.css';
+import { readableError } from './errors';
 
 type Loader = 'vanilla' | 'fabric';
 type Resource = { id: string; title: string; description: string };
 type InstallFile = { title: string; version: string };
 type Instance = { loader?: Loader; id: string; name: string; version: string; installed: boolean };
+type Player = { name: string; skin?: string; offline: boolean };
 type Version = { id: string; type: string };
 type Progress = { completed: number; total: number; bytesPerSecond: number };
 declare global {
@@ -36,7 +38,9 @@ declare global {
       previewMod(id: string, project: string): Promise<{ token: string; files: InstallFile[] }>;
       installMod(id: string, token: string): Promise<InstallFile[]>;
       install(id: string): Promise<Instance[]>;
-      signIn(): Promise<{ name: string; skin?: string }>;
+      accountSettings(): Promise<{ clientId: string; offlineAvailable: boolean }>;
+      signIn(clientId: string): Promise<Player & { offlineAvailable: boolean }>;
+      signInOffline(): Promise<Player>;
       signOut(): Promise<void>;
       play(id: string): Promise<void>;
       onGameExit(callback: (code: number | null) => void): () => void;
@@ -57,24 +61,27 @@ function App() {
   const [loader, setLoader] = useState<Loader>('vanilla');
   const [version, setVersion] = useState('');
   const [allVersions, setAllVersions] = useState(false);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [offlineAvailable, setOfflineAvailable] = useState(false);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const [player, setPlayer] = useState<{ name: string; skin?: string }>();
+  const [player, setPlayer] = useState<Player>();
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState<Progress>();
   const current = instances.find(instance => instance.id === selected) ?? instances[0];
 
   async function loadVersions() {
-    setBusy('正在读取官方版本目录');
+    setLoadingVersions(true);
     setError('');
     try {
       const entries = await window.launcher.versions();
       setVersions(entries);
       setVersion(entries.find(entry => entry.type === 'release')?.id ?? '');
     } catch (error) {
-      setError(String(error));
+      setError(readableError(error));
     } finally {
-      setBusy('');
+      setLoadingVersions(false);
     }
   }
 
@@ -84,8 +91,12 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    window.launcher.accountSettings().then(settings => {
+      setClientId(settings.clientId);
+      setOfflineAvailable(settings.offlineAvailable);
+    }).catch(error => setError(readableError(error)));
     window.launcher.system().then(setHardware).catch(() => {});
-    window.launcher.list().then(setInstances).catch(error => setError(String(error)));
+    window.launcher.list().then(setInstances).catch(error => setError(readableError(error)));
     void loadVersions();
     const stopProgress = window.launcher.onProgress(setProgress);
     const stopExit = window.launcher.onGameExit(code => {
@@ -106,7 +117,7 @@ function App() {
       setName('');
       setPage('home');
     } catch (error) {
-      setError(String(error));
+      setError(readableError(error));
     } finally {
       setBusy('');
     }
@@ -120,24 +131,31 @@ function App() {
     try {
       setInstances(await window.launcher.install(current.id));
     } catch (error) {
-      setError(String(error));
+      setError(readableError(error));
     } finally {
       setBusy('');
     }
   }
 
-  async function changeAccount() {
-    setBusy(player ? '正在退出登录' : '请在系统浏览器中完成 Microsoft 登录');
+  async function changeAccount(mode: 'online' | 'offline' | 'forget') {
+    setBusy(mode === 'online' ? '请在系统浏览器中完成 Microsoft 登录' : '正在切换账号');
     setError('');
     try {
-      if (player) {
+      if (mode === 'forget') {
         await window.launcher.signOut();
         setPlayer(undefined);
+        setOfflineAvailable(false);
+      } else if (mode === 'offline') {
+        setPlayer(await window.launcher.signInOffline());
+        setPage('home');
       } else {
-        setPlayer(await window.launcher.signIn());
+        const account = await window.launcher.signIn(clientId.trim());
+        setPlayer(account);
+        setOfflineAvailable(account.offlineAvailable);
+        setPage('home');
       }
     } catch (error) {
-      setError(String(error));
+      setError(readableError(error));
     } finally {
       setBusy('');
     }
@@ -152,7 +170,7 @@ function App() {
       await window.launcher.play(current.id);
     } catch (error) {
       setPlaying(false);
-      setError(String(error));
+      setError(readableError(error));
     } finally {
       setBusy('');
     }
@@ -163,7 +181,7 @@ function App() {
   const transfer = resourceBusy || busy === '正在安装游戏文件';
   return <div className="layout" data-reduced={hardware?.reducedEffects ?? false}>
     <aside>
-      <header><img src="./launcher-mark.png" alt="" /><strong>Java Edition<br /><small>启动器</small></strong></header>
+      <header><img src="./launcher-mark.png" alt="" /><strong>Zephyr<br /><small>Minecraft 启动器</small></strong></header>
       <nav aria-label="主导航">{navigation.map(([value, label, path]) =>
         <button type="button" key={value} aria-current={page === value ? 'page' : undefined}
           onClick={() => { setProgress(undefined); setPage(value); }} disabled={resourceBusy}>
@@ -181,15 +199,15 @@ function App() {
         <label className="theme">主题<select value={theme} onChange={event => setTheme(event.target.value)}>
           <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
         </select></label>
-        {player && <span className="player">{player.skin && <span className="avatar"><img src={player.skin} alt="" /></span>}{player.name}</span>}
-        <button type="button" disabled={locked} onClick={changeAccount}>
-          {player ? '退出账号' : 'Microsoft 登录'}
+        {player && <span className="player">{player.skin && <span className="avatar"><img src={player.skin} alt="" /></span>}{player.name}{player.offline && <small>离线</small>}</span>}
+        <button type="button" disabled={locked} onClick={() => setPage('account')}>
+          {player ? '账号设置' : '登录'}
         </button>
       </div>
       <div key={page} className="page">
       {page === 'home' && <section className="hero">
         <img className="hero-mark" src="./launcher-mark.png" alt="" />
-        <p className="eyebrow">JAVA EDITION</p>
+        <p className="eyebrow">MINECRAFT JAVA EDITION</p>
         <h1>{current?.name ?? '游戏实例'}</h1>
         <p>{current ? `${current.version} · ${current.installed ? '游戏文件已下载' : '待安装'}` :
           '从 Mojang 官方版本目录创建一个独立游戏实例。'}</p>
@@ -200,6 +218,20 @@ function App() {
         </button>}
         {!current && <button className="primary" onClick={() => setPage('instances')}>创建游戏实例</button>}
         {hardware && <p className="memory">推荐 JVM 内存 · {hardware.memory} GB</p>}
+      </section>}
+      {page === 'account' && <section className="panel">
+        <h2>账号</h2>
+        <p>第一次使用请通过 Microsoft 登录，完成 Minecraft Java 版所有权验证。之后可以用同一账号离线玩本地存档。</p>
+        <form className="sign-in-form" onSubmit={event => { event.preventDefault(); void changeAccount('online'); }}>
+          <label>Microsoft 应用程序客户端 ID<input value={clientId} required maxLength={36}
+            onChange={event => setClientId(event.target.value)} placeholder="应用程序（客户端）ID" /></label>
+          <button className="primary" disabled={locked || !clientId.trim()}>Microsoft 登录</button>
+        </form>
+        <div className="quick-actions">
+          {offlineAvailable && <button disabled={locked} onClick={() => void changeAccount('offline')}>离线登录</button>}
+          {(player || offlineAvailable) && <button disabled={locked} onClick={() => void changeAccount('forget')}>退出并清除本机账号</button>}
+        </div>
+        {!offlineAvailable && <p>在系统钥匙串可用时，成功登录后会启用离线模式。</p>}
       </section>}
       {page === 'instances' && <section className="panel">
         <h2>创建实例</h2>
@@ -222,7 +254,8 @@ function App() {
           }} />显示快照与历史版本</label>
           <button type="submit" disabled={!versions.length || !!busy || !name.trim()}>创建实例</button>
         </form>
-        {!versions.length && !busy && <button type="button" onClick={loadVersions}>重新读取官方目录</button>}
+        {loadingVersions && <p role="status">正在读取官方版本目录…</p>}
+        {!versions.length && !busy && !loadingVersions && <button type="button" onClick={loadVersions}>重新读取官方目录</button>}
       </section>}
       <Suspense fallback={<p role="status">正在加载页面…</p>}>
         {page === 'performance' && (supported ?

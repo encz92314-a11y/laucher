@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { validClientId } from './session.mjs';
 
 const microsoft = 'https://login.microsoftonline.com/consumers/oauth2/v2.0';
 const minecraft = 'https://api.minecraftservices.com';
@@ -57,9 +58,7 @@ export async function minecraftIdentity(microsoftToken, request = json) {
 }
 
 export async function signIn(clientId, openBrowser) {
-  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(clientId ?? '')) {
-    throw new Error('请先配置已获授权的 Microsoft 客户端 ID');
-  }
+  if (!validClientId(clientId)) throw new Error('请先配置已获授权的 Microsoft 客户端 ID');
   const state = randomBytes(32).toString('base64url');
   const verifier = randomBytes(64).toString('base64url');
   const challenge = createHash('sha256').update(verifier).digest('base64url');
@@ -90,7 +89,7 @@ export async function signIn(clientId, openBrowser) {
     const authorize = new URL(microsoft + '/authorize');
     authorize.search = new URLSearchParams({
       client_id: clientId, response_type: 'code', redirect_uri: redirect,
-      scope: 'XboxLive.signin', state, code_challenge: challenge, code_challenge_method: 'S256',
+      scope: 'XboxLive.signin offline_access', state, code_challenge: challenge, code_challenge_method: 'S256',
     }).toString();
     timeout = setTimeout(() => fail(new Error('登录超时')), 180_000);
     await openBrowser(authorize.toString());
@@ -101,10 +100,20 @@ export async function signIn(clientId, openBrowser) {
       }),
     });
     if (!token.access_token) throw new Error('Microsoft 返回的凭据不完整');
-    return minecraftIdentity(token.access_token);
+    return { ...(await minecraftIdentity(token.access_token)), clientId, refresh: token.refresh_token };
   } finally {
     clearTimeout(timeout);
     server.close();
     server.closeAllConnections();
   }
+}
+
+export async function refreshSignIn({ clientId, refresh }) {
+  if (!validClientId(clientId) || !refresh) throw new Error('会话已过期，请重新登录 Microsoft');
+  const token = await json(microsoft + '/token', {
+    body: new URLSearchParams({ client_id: clientId, refresh_token: refresh,
+      grant_type: 'refresh_token', scope: 'XboxLive.signin offline_access' }),
+  });
+  if (!token.access_token) throw new Error('Microsoft 返回的凭据不完整');
+  return { ...(await minecraftIdentity(token.access_token)), clientId, refresh: token.refresh_token ?? refresh };
 }

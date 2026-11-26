@@ -27,6 +27,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Check live Fabric 26.3 profile and libraries
+        if: runner.os == 'macOS'
+        timeout-minutes: 3
+        continue-on-error: true
+        run: node scripts/check-fabric-26.3.mjs
       - name: Build package
         shell: bash
         run: |
@@ -41,7 +46,7 @@ jobs:
           mkdir -p downloads
           files=(release/*.${{ matrix.extension }})
           test "${#files[@]}" -eq 1
-          mv "${files[0]}" "downloads/minecraft-launcher-${version}-${{ matrix.id }}.${{ matrix.extension }}"
+          mv "${files[0]}" "downloads/zephyr-${version}-${{ matrix.id }}.${{ matrix.extension }}"
       - name: Mount packaged macOS disk image
         if: runner.os == 'macOS'
         shell: bash

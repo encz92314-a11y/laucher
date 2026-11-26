@@ -66,3 +66,24 @@ test('Modrinth resolves required dependencies and stages verified downloads', as
   assert.deepEqual((await readdir(join(root, 'mods'))).sort(),
     ['modrinth-child-childVersion.jar', 'modrinth-parent-parentVersion.jar']);
 });
+
+test('accepts Maven build versions and classified Fabric JARs while rejecting unsafe coordinates', async () => {
+  const vanilla = { id: '26.3', libraries: [{ name: 'net.fabricmc:example:25.0' }],
+    arguments: { jvm: [], game: [] } };
+  let coordinate = 'net.fabricmc:example:26.3+build.1:client@jar';
+  const request = async url => {
+    if (url.endsWith('.sha1')) return new Response('b'.repeat(40));
+    if (url.endsWith('/profile/json')) {
+      return Response.json({ inheritsFrom: '26.3', mainClass: 'fabric.Client',
+        libraries: [{ name: coordinate, url: 'https://maven.fabricmc.net' }] });
+    }
+    return Response.json([{ loader: { stable: true, version: '0.20' } }]);
+  };
+  const result = await fabricProfile(vanilla, request);
+  const artifact = result.libraries[0].downloads.artifact;
+  assert.equal(artifact.path, 'net/fabricmc/example/26.3+build.1/example-26.3+build.1-client.jar');
+  assert.match(artifact.url, /26\.3%2Bbuild\.1-client\.jar$/);
+  assert.equal(result.libraries.length, 2);
+  coordinate = 'net.fabricmc:example:../../outside';
+  await assert.rejects(fabricProfile(vanilla, request), /无法识别的库坐标/);
+});

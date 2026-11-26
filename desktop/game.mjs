@@ -22,8 +22,8 @@ export function launchArguments(version, game, account, memory = 2, extra = []) 
   const variables = {
     auth_player_name: account.name, auth_uuid: account.id, auth_access_token: account.access,
     version_name: version.id, game_directory: game, assets_root: assets,
-    assets_index_name: version.assetIndex.id, user_type: 'msa', version_type: version.type,
-    auth_xuid: '', clientid: '', launcher_name: 'Java Edition Launcher', launcher_version: '0.2.2',
+    assets_index_name: version.assetIndex.id, user_type: account.offline ? 'legacy' : 'msa', user_properties: '{}', version_type: version.type,
+    auth_xuid: '', clientid: '', launcher_name: 'Zephyr', launcher_version: '0.2.3',
     natives_directory: localPath(game, 'natives'), classpath: classpath.join(delimiter),
     library_directory: libraries, classpath_separator: delimiter,
   };
@@ -68,7 +68,7 @@ export async function selectJava(major, { platform = process.platform, arch = pr
 }
 
 export async function launchGame(game, account, loader, preset) {
-  if (!account || account.expires <= Date.now()) throw new Error('请先登录拥有 Minecraft Java 版的 Microsoft 账号');
+  if (!account || (!account.offline && account.expires <= Date.now())) throw new Error('请先登录拥有 Minecraft Java 版的 Microsoft 账号');
   const version = JSON.parse(await readFile(localPath(game, loader === 'fabric' ? 'fabric.json' : 'version.json'), 'utf8'));
   const java = await selectJava(version.javaVersion?.majorVersion ?? 8);
   const extra = loader === 'fabric' ? await gameProfile(game, preset) : [];

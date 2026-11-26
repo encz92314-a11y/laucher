@@ -1,3 +1,4 @@
+import { readableError } from './errors';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 
@@ -20,7 +21,7 @@ export function Resources({ instance, disabled, notify }: { instance: string; di
     try {
       await action();
     } catch (error) {
-      setError(String(error));
+      setError(readableError(error));
     } finally {
       setWorking(false);
       notify(false);

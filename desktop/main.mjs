@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { signIn } from './account.mjs';
+import { existsSync } from 'node:fs';
+import { accountStore, offlineAccount } from './session.mjs';
+import { signIn, refreshSignIn } from './account.mjs';
 import { modrinth } from './modrinth.mjs';
 import { activatePreset, currentProfile, preparePreset, selectShader, shaders, systemProfile } from './performance.mjs';
 import { mkdir } from 'node:fs/promises';
@@ -17,6 +19,13 @@ let game;
 let starting = false;
 let installing = false;
 
+// Keep the data path used before the display name changed.
+const previousData = app.getPath('userData');
+app.setName('Zephyr');
+const legacyData = [previousData, join(app.getPath('appData'), 'minecraft-launcher'),
+  join(app.getPath('appData'), 'Java Edition Launcher')]
+  .find(path => existsSync(join(path, 'launcher-data')));
+app.setPath('userData', legacyData ?? join(app.getPath('appData'), 'minecraft-launcher'));
 if (process.argv.includes('--smoke-test')) {
   const smokeDirectory = process.env.LAUNCHER_SMOKE_DIRECTORY;
   if (!smokeDirectory) app.exit(1);
@@ -57,6 +66,8 @@ app.whenReady().then(() => {
   const root = join(app.getPath('userData'), 'launcher-data');
   const service = launcher(root);
   const resources = modrinth();
+  const accounts = accountStore(root, safeStorage);
+  const publicAccount = value => ({ name: value.name, skin: value.skin, offline: !!value.offline });
   let pending;
   async function fabricInstance(id) {
     const instance = (await service.list()).find(row => row.id === id);
@@ -131,27 +142,45 @@ app.whenReady().then(() => {
         installing = false;
       }
     },
-    async signIn() {
-      if (signingIn) throw new Error('登录正在进行');
+    async accountSettings() {
+      return { clientId: await accounts.clientId(), offlineAvailable: !!await accounts.saved() };
+    },
+    async signIn(_, clientId) {
+      if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
       signingIn = true;
       try {
-        account = await signIn(process.env.MINECRAFT_CLIENT_ID, url => shell.openExternal(url));
-        return { name: account.name, skin: account.skin };
+        const chosen = clientId || await accounts.clientId();
+        if (clientId) await accounts.configure(clientId);
+        account = await signIn(chosen, url => shell.openExternal(url));
+        const offlineAvailable = await accounts.remember(account).catch(() => false);
+        return { ...publicAccount(account), offlineAvailable };
       } finally {
         signingIn = false;
       }
     },
-    signOut() {
-      if (signingIn) throw new Error('登录正在进行');
+    async signInOffline() {
+      if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
+      const saved = await accounts.saved();
+      if (!saved) throw new Error('请先联网登录并完成正版验证，启用本机离线模式');
+      account = offlineAccount(saved);
+      return publicAccount(account);
+    },
+    async signOut() {
+      if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
+      await accounts.forget();
       account = undefined;
     },
     async play(event, id) {
-      if (installing) throw new Error('请等待文件安装完成');
+      if (installing || signingIn) throw new Error('请等待安装或登录完成');
       if (game || starting) throw new Error('游戏已经启动或正在启动');
       starting = true;
       try {
         const instance = (await service.list()).find(row => row.id === id && row.installed);
         if (!instance) throw new Error('请先安装此游戏实例');
+        if (account && !account.offline && account.expires < Date.now() + 30_000) {
+          account = await refreshSignIn(account);
+          await accounts.remember(account).catch(() => false);
+        }
         game = await launchGame(directory(instance), account, instance.loader,
           instance.loader === 'fabric' ? await currentProfile(directory(instance)) : undefined);
         game.once('close', code => {

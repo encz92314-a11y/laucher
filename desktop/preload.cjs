@@ -13,7 +13,9 @@ contextBridge.exposeInMainWorld('launcher', {
   searchMods: (id, query) => ipcRenderer.invoke('launcher:searchMods', id, query),
   previewMod: (id, project) => ipcRenderer.invoke('launcher:previewMod', id, project),
   installMod: (id, token) => ipcRenderer.invoke('launcher:installMod', id, token),
-  signIn: () => ipcRenderer.invoke('launcher:signIn'),
+  accountSettings: () => ipcRenderer.invoke('launcher:accountSettings'),
+  signIn: clientId => ipcRenderer.invoke('launcher:signIn', clientId),
+  signInOffline: () => ipcRenderer.invoke('launcher:signInOffline'),
   signOut: () => ipcRenderer.invoke('launcher:signOut'),
   play: id => ipcRenderer.invoke('launcher:play', id),
   onGameExit: callback => {

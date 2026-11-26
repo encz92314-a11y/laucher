@@ -1,5 +1,5 @@
 appId: org.launcher.minecraft
-productName: Java Edition Launcher
+productName: Zephyr
 publish: null
 directories:
   output: release

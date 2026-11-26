@@ -1,3 +1,4 @@
+import { readableError } from './errors';
 import { useEffect, useState } from 'react';
 
 export const modes = {
@@ -22,7 +23,7 @@ export function Profiles({ id, disabled, notify }: { id: string; disabled: boole
   useEffect(() => {
     let active = true;
     window.launcher.profile(id).then(value => { if (active) setCurrent(value); },
-      reason => { if (active) setError(String(reason)); });
+      reason => { if (active) setError(readableError(reason)); });
     return () => { active = false; };
   }, [id]);
   async function perform(action: () => Promise<void>, message: string) {
@@ -32,7 +33,7 @@ export function Profiles({ id, disabled, notify }: { id: string; disabled: boole
     setSaved('');
     setStatus(message);
     try { await action(); }
-    catch (error) { setError(String(error)); }
+    catch (error) { setError(readableError(error)); }
     finally { setWorking(false); setStatus(''); notify(false); }
   }
   return <section className="panel">
