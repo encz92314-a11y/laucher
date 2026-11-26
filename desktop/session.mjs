@@ -31,12 +31,15 @@ export function accountStore(root, storage) {
       });
       const explicit = JSON.parse(value).clientId ?? process.env.MINECRAFT_CLIENT_ID;
       if (validClientId(explicit)) return explicit;
-      const packaged = await readFile(new URL('./oauth-public.json', import.meta.url), 'utf8').catch(error => {
-        if (error.code === 'ENOENT') return '{}';
-        throw error;
-      });
-      const candidate = JSON.parse(packaged).clientId;
-      return validClientId(candidate) ? candidate : '';
+      for (const file of ['./oauth-public.json', './oauth-default.json']) {
+        const packaged = await readFile(new URL(file, import.meta.url), 'utf8').catch(error => {
+          if (error.code === 'ENOENT') return '{}';
+          throw error;
+        });
+        const candidate = JSON.parse(packaged).clientId;
+        if (validClientId(candidate)) return candidate;
+      }
+      return '';
     },
     async configure(clientId) {
       if (!validClientId(clientId)) throw new Error('请输入有效的 Microsoft 应用程序客户端 ID');

@@ -54,3 +54,13 @@ test('plain-text storage fallback must not store account credentials', async () 
   assert.equal(await accounts.remember({}), false);
   assert.equal(await accounts.saved(), undefined);
 });
+
+test('a new profile has a default Microsoft application ID', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'zephyr-default-oauth-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const packagedId = JSON.parse(await readFile(new URL('../desktop/oauth-default.json', import.meta.url), 'utf8')).clientId;
+  const configuredId = process.env.MINECRAFT_CLIENT_ID;
+  if (!configuredId) assert.equal(await accountStore(root, {}).clientId(), packagedId);
+  const auth = await accountStore(root, {}).clientId();
+  assert.match(auth, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);
+});
