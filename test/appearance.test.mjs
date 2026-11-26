@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { cropRectangle } from '../src/crop.ts';
+import { cropRectangle, moveCrop } from '../src/crop.ts';
 import { appearanceDefault, appearanceStore, validateAppearance } from '../desktop/appearance.mjs';
 import { totalPages, visiblePages, pageSize, maxOffset } from '../src/pagination.ts';
 
@@ -47,4 +47,10 @@ test('background crop zoom and placement stay inside the selected image', () => 
     { width: 640, height: 360, left: 0, top: 60 });
   assert.deepEqual(cropRectangle(640, 480, 16 / 9, 2, 1, 1),
     { width: 320, height: 180, left: 320, top: 300 });
+});
+
+test('dragging the background moves in the pointer direction and never exposes empty edges', () => {
+  assert.deepEqual(moveCrop({ x: .5, y: .5 }, 200, 100, 50, -25), { x: .25, y: .75 });
+  assert.deepEqual(moveCrop({ x: .5, y: .5 }, 0, 100, 1000, 1000), { x: .5, y: 0 });
+  assert.deepEqual(moveCrop({ x: .75, y: .5 }, 200, 100, -1000, 0), { x: 1, y: .5 });
 });

@@ -171,9 +171,31 @@ header small { display: inline-block; margin-top: 4px; font-size: 10px; }
 .pagination label { display: flex; align-items: center; gap: 8px; }
 .pagination input { inline-size: 76px; }
 
-.wallpaper-crop { margin-block: 12px; }
-.wallpaper-crop canvas { display: block; width: 100%; max-height: 330px; object-fit: contain;
-  background: #151019; border: 1px solid var(--line); border-radius: 10px; }
+dialog.wallpaper-crop {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  margin: auto;
+  padding: clamp(14px, 2.5vw, 24px);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--canvas) 93%, var(--accent));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 20px 90px #0007;
+}
+.wallpaper-crop::backdrop { background: #0b0712b5; }
+.crop-header, .crop-actions { display: flex; align-items: center; gap: 8px; }
+.crop-header { justify-content: space-between; }
+.crop-header h3 { margin: 0; }
+.crop-close { min-width: 38px; font-size: 1.23rem; line-height: 1; }
+.wallpaper-crop > p { margin-block: 8px 12px; }
+.wallpaper-crop canvas { display: block; width: 100%; height: auto; aspect-ratio: 1000 / 560;
+  border: 1px solid var(--line); border-radius: 10px; background: #16121d; touch-action: none; cursor: grab; }
+.wallpaper-crop canvas.is-dragging { cursor: grabbing; }
+.wallpaper-crop .crop-tools { display: grid; grid-template-columns: minmax(118px,.36fr) 1fr; gap: 14px; margin: 10px 0;
+  padding: 8px 0; border: 0; }
+.crop-tools .slider { margin: 0; }
+.crop-actions { flex-wrap: wrap; justify-content: flex-end; }
 .saved-accounts { display: grid; gap: 7px; margin: 12px 0; }
 .saved-accounts button, .account-trigger { display: flex; align-items: center; gap: 8px; }
 .saved-accounts small { margin-inline-start: auto; }

@@ -70,13 +70,6 @@ export function AppearanceSettings({ values, image, update, setImage }: {
           change({ wallpaper: false });
         })}>移除背景图</button>}
       </div>
-      {draft && <WallpaperCrop key={draft.length} source={draft} busy={working}
-        cancel={() => setDraft(undefined)} apply={jpeg => void run(async () => {
-          const cropped = await window.launcher.saveWallpaperCrop(jpeg);
-          setImage(cropped);
-          setDraft(undefined);
-          change({ wallpaper: true });
-        })} />}
       {image && <>
         <label className="check"><input type="checkbox" checked={values.wallpaper}
           onChange={event => change({ wallpaper: event.target.checked })} />显示背景图</label>
@@ -96,6 +89,13 @@ export function AppearanceSettings({ values, image, update, setImage }: {
         setMessage('已恢复默认外观。');
       })}>恢复默认</button>
     </div>
+    {draft && <WallpaperCrop source={draft} busy={working} error={error}
+        cancel={() => { setDraft(undefined); setError(''); }} apply={jpeg => void run(async () => {
+          const cropped = await window.launcher.saveWallpaperCrop(jpeg);
+          setImage(cropped);
+          setDraft(undefined);
+          change({ wallpaper: true });
+        })} />}
     {message && <p role="status">{message}</p>}
     {error && <p className="error" role="alert">{error}</p>}
   </section>;
