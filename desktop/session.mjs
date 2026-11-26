@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { localPath, writeJSON } from './core.mjs';
 
@@ -28,7 +29,14 @@ export function accountStore(root, storage) {
         if (error.code === 'ENOENT') return '{}';
         throw error;
       });
-      return JSON.parse(value).clientId ?? process.env.MINECRAFT_CLIENT_ID ?? '';
+      const explicit = JSON.parse(value).clientId ?? process.env.MINECRAFT_CLIENT_ID;
+      if (validClientId(explicit)) return explicit;
+      const packaged = await readFile(new URL('./oauth-public.json', import.meta.url), 'utf8').catch(error => {
+        if (error.code === 'ENOENT') return '{}';
+        throw error;
+      });
+      const candidate = JSON.parse(packaged).clientId;
+      return validClientId(candidate) ? candidate : '';
     },
     async configure(clientId) {
       if (!validClientId(clientId)) throw new Error('请输入有效的 Microsoft 应用程序客户端 ID');
@@ -46,6 +54,11 @@ export function accountStore(root, storage) {
   };
 }
 
-export function offlineAccount({ id, name, skin }) {
-  return { id, name, skin, offline: true, access: '0' };
+export function offlineAccount(value) {
+  const name = typeof value === 'string' ? value.trim() : '';
+  if (!/^[a-zA-Z0-9_]{3,16}$/.test(name)) throw new Error('离线昵称须为 3–16 个英文字母、数字或下划线');
+  const uuid = createHash('md5').update('OfflinePlayer:' + name).digest();
+  uuid[6] = (uuid[6] & 0x0f) | 0x30;
+  uuid[8] = (uuid[8] & 0x3f) | 0x80;
+  return { id: uuid.toString('hex'), name, offline: true, access: '0' };
 }

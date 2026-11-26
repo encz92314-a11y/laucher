@@ -1,6 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
+import type { Resource, ResourceDetails, ResourceType } from './resources';
+import { Skins } from './skins';
+import type { DefaultSkin, Skin } from './skins';
 import type { Preset } from './profiles';
 const Resources = lazy(() => import('./resources').then(module => ({ default: module.Resources })));
 const Profiles = lazy(() => import('./profiles').then(module => ({ default: module.Profiles })));
@@ -9,13 +12,12 @@ const navigation = [
   ['home', '首页', 'M3 10l9-7 9 7v10H4V10m5 10v-7h6v7'],
   ['instances', '实例', 'M12 3l9 5v8l-9 5-9-5V8l9-5zm-9 5l9 5 9-5m-9 5v8'],
   ['performance', '性能', 'M4 19a9 9 0 1116 0H4zm8-3l4-5'],
-  ['mods', '模组', 'M5 4h14v16H5zM8 8h8M8 12h8m-8 4h4'],
+  ['mods', '资源中心', 'M5 4h14v16H5zM8 8h8M8 12h8m-8 4h4'],
 ] as const;
 import './style.css';
 import { readableError } from './errors';
 
 type Loader = 'vanilla' | 'fabric';
-type Resource = { id: string; title: string; description: string };
 type InstallFile = { title: string; version: string };
 type Instance = { loader?: Loader; id: string; name: string; version: string; installed: boolean };
 type Player = { name: string; skin?: string; offline: boolean };
@@ -34,13 +36,18 @@ declare global {
       list(): Promise<Instance[]>;
       versions(): Promise<Version[]>;
       create(name: string, version: string, loader: Loader): Promise<Instance[]>;
-      searchMods(id: string, query: string): Promise<Resource[]>;
+      browseResources(kind: ResourceType, query: string, offset: number): Promise<{ total: number; items: Resource[] }>;
+      resourceDetails(project: string): Promise<ResourceDetails>;
+      openTranslation(description: string): Promise<void>;
+      chooseSkin(id?: string, index?: number): Promise<Skin | null>;
+      listDefaultSkins(id: string): Promise<DefaultSkin[]>;
+      uploadSkin(variant: Skin['variant']): Promise<Player>;
       previewMod(id: string, project: string): Promise<{ token: string; files: InstallFile[] }>;
       installMod(id: string, token: string): Promise<InstallFile[]>;
       install(id: string): Promise<Instance[]>;
-      accountSettings(): Promise<{ clientId: string; offlineAvailable: boolean }>;
-      signIn(clientId: string): Promise<Player & { offlineAvailable: boolean }>;
-      signInOffline(): Promise<Player>;
+      accountSettings(): Promise<{ clientId: string }>;
+      signIn(clientId: string): Promise<Player>;
+      signInOffline(nickname: string): Promise<Player>;
       signOut(): Promise<void>;
       play(id: string): Promise<void>;
       onGameExit(callback: (code: number | null) => void): () => void;
@@ -63,7 +70,8 @@ function App() {
   const [allVersions, setAllVersions] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [clientId, setClientId] = useState('');
-  const [offlineAvailable, setOfflineAvailable] = useState(false);
+  const [nickname, setNickname] = useState(localStorage.getItem('nickname') ?? '');
+  const [configureMicrosoft, setConfigureMicrosoft] = useState(false);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [player, setPlayer] = useState<Player>();
@@ -93,7 +101,6 @@ function App() {
   useEffect(() => {
     window.launcher.accountSettings().then(settings => {
       setClientId(settings.clientId);
-      setOfflineAvailable(settings.offlineAvailable);
     }).catch(error => setError(readableError(error)));
     window.launcher.system().then(setHardware).catch(() => {});
     window.launcher.list().then(setInstances).catch(error => setError(readableError(error)));
@@ -144,14 +151,13 @@ function App() {
       if (mode === 'forget') {
         await window.launcher.signOut();
         setPlayer(undefined);
-        setOfflineAvailable(false);
       } else if (mode === 'offline') {
-        setPlayer(await window.launcher.signInOffline());
+        setPlayer(await window.launcher.signInOffline(nickname));
+        localStorage.setItem('nickname', nickname.trim());
         setPage('home');
       } else {
         const account = await window.launcher.signIn(clientId.trim());
         setPlayer(account);
-        setOfflineAvailable(account.offlineAvailable);
         setPage('home');
       }
     } catch (error) {
@@ -219,20 +225,37 @@ function App() {
         {!current && <button className="primary" onClick={() => setPage('instances')}>创建游戏实例</button>}
         {hardware && <p className="memory">推荐 JVM 内存 · {hardware.memory} GB</p>}
       </section>}
-      {page === 'account' && <section className="panel">
-        <h2>账号</h2>
-        <p>第一次使用请通过 Microsoft 登录，完成 Minecraft Java 版所有权验证。之后可以用同一账号离线玩本地存档。</p>
-        <form className="sign-in-form" onSubmit={event => { event.preventDefault(); void changeAccount('online'); }}>
-          <label>Microsoft 应用程序客户端 ID<input value={clientId} required maxLength={36}
-            onChange={event => setClientId(event.target.value)} placeholder="应用程序（客户端）ID" /></label>
-          <button className="primary" disabled={locked || !clientId.trim()}>Microsoft 登录</button>
-        </form>
-        <div className="quick-actions">
-          {offlineAvailable && <button disabled={locked} onClick={() => void changeAccount('offline')}>离线登录</button>}
-          {(player || offlineAvailable) && <button disabled={locked} onClick={() => void changeAccount('forget')}>退出并清除本机账号</button>}
-        </div>
-        {!offlineAvailable && <p>在系统钥匙串可用时，成功登录后会启用离线模式。</p>}
-      </section>}
+      {page === 'account' && <>
+        <section className="panel">
+          <h2>登录 Zephyr</h2>
+          <p>用 Microsoft 账号登录时，密码只在微软官方网站输入。</p>
+          <button className="primary" disabled={locked} onClick={() => {
+            if (clientId.trim()) void changeAccount('online');
+            else { setConfigureMicrosoft(true); setError('首次使用需要设置 Minecraft Services 已授权的应用客户端 ID。'); }
+          }}>在浏览器登录 Microsoft</button>
+          <details open={configureMicrosoft || undefined}>
+            <summary>Microsoft 应用配置</summary>
+            <form className="sign-in-form" onSubmit={event => { event.preventDefault(); void changeAccount('online'); }}>
+              <label>应用客户端 ID<input value={clientId} required maxLength={36}
+                onChange={event => setClientId(event.target.value)} /></label>
+              <button disabled={locked || !clientId.trim()}>保存并登录</button>
+            </form>
+          </details>
+          <div className="installation-plan">
+            <h3>离线游玩</h3>
+            <p>输入昵称即可启动已安装的单人游戏。</p>
+            <form className="sign-in-form" onSubmit={event => { event.preventDefault(); void changeAccount('offline'); }}>
+              <label>游戏昵称<input pattern="[A-Za-z0-9_]{3,16}" maxLength={16} autoComplete="nickname"
+                value={nickname} placeholder="3–16 个字母、数字或下划线" required onChange={event => setNickname(event.target.value)} /></label>
+              <button disabled={locked || !nickname.trim()}>离线进入</button>
+            </form>
+          </div>
+          {player && <div className="quick-actions"><button disabled={locked} onClick={() => void changeAccount('forget')}>退出账号</button></div>}
+        </section>
+        <Skins key={current?.id} instance={current?.installed ? current.id : undefined} current={player?.skin}
+          online={!!player && !player.offline} disabled={locked}
+          update={skin => setPlayer(value => value ? { ...value, skin } : value)} />
+      </>}
       {page === 'instances' && <section className="panel">
         <h2>创建实例</h2>
         <form onSubmit={create}>
@@ -264,11 +287,10 @@ function App() {
           }} /> :
           <section className="panel"><h2>性能预设</h2><p>先创建并安装一个 Fabric 实例。</p>
             <button onClick={() => setPage('instances')}>前往实例</button></section>)}
-        {page === 'mods' && (supported ?
-          <Resources key={current.id} instance={current.id} disabled={!!busy || playing}
-            notify={active => { setProgress(undefined); setResourceBusy(active); }} /> :
-          <section className="panel"><h2>模组</h2><p>先创建并安装一个 Fabric 实例。</p>
-            <button onClick={() => setPage('instances')}>前往实例</button></section>)}
+        {page === 'mods' &&
+          <Resources key={current?.id} instance={current?.installed ? current.id : undefined}
+            instanceName={current?.name} disabled={!!busy || playing}
+            notify={active => { setProgress(undefined); setResourceBusy(active); }} />}
       </Suspense>
       </div>
       {(busy || (progress && transfer) || error) && <div className="status-area">

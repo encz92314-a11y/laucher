@@ -32,6 +32,12 @@ jobs:
         timeout-minutes: 3
         continue-on-error: true
         run: node scripts/check-fabric-26.3.mjs
+      - name: Set optional public Microsoft application ID
+        shell: bash
+        env:
+          ZEPHYR_PUBLIC_CLIENT_ID: ${{ vars.MINECRAFT_CLIENT_ID }}
+        run: |
+          node --input-type=module -e 'import { writeFileSync } from "node:fs"; import { validClientId } from "./desktop/session.mjs"; const clientId = process.env.ZEPHYR_PUBLIC_CLIENT_ID; if (validClientId(clientId)) writeFileSync("desktop/oauth-public.json", JSON.stringify({ clientId }));'
       - name: Build package
         shell: bash
         run: |

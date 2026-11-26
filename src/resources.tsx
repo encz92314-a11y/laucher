@@ -1,77 +1,136 @@
-import { readableError } from './errors';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { readableError } from './errors';
 
+export const resourceTypes = { mod: '模组', shader: '光影', resourcepack: '材质包', modpack: '整合包' } as const;
+export type ResourceType = keyof typeof resourceTypes;
+export type Resource = { id: string; title: string; description: string; icon?: string; downloads: number };
+export type ResourceDetails = Omit<Resource, 'downloads'> & {
+  kind: ResourceType; body: string; gallery: { url: string; title: string }[]; versions: string[];
+};
 type Bridge = Window['launcher'];
+type TranslatorWindow = Window & {
+  Translator?: {
+    availability(options: { sourceLanguage: string; targetLanguage: string }): Promise<string>;
+    create(options: { sourceLanguage: string; targetLanguage: string }): Promise<{ translate(text: string): Promise<string>; destroy(): void }>;
+  };
+};
 
-export function Resources({ instance, disabled, notify }: { instance: string; disabled: boolean; notify: (active: boolean) => void }) {
+export function Resources({ instance, instanceName, disabled, notify }: {
+  instance?: string; instanceName?: string; disabled: boolean; notify: (active: boolean) => void;
+}) {
+  const [type, setType] = useState<ResourceType>('mod');
   const [query, setQuery] = useState('');
-  const [matches, setMatches] = useState<Awaited<ReturnType<Bridge['searchMods']>>>();
+  const [list, setList] = useState<{ total: number; items: Resource[] }>();
+  const [offset, setOffset] = useState(0);
+  const [detail, setDetail] = useState<ResourceDetails>();
   const [plan, setPlan] = useState<Awaited<ReturnType<Bridge['previewMod']>>>();
+  const [translation, setTranslation] = useState('');
+  const [fallback, setFallback] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
   const busy = disabled || working;
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, install = false) {
     setWorking(true);
-    notify(true);
+    if (install) notify(true);
     setError('');
     setMessage('');
-    try {
-      await action();
-    } catch (error) {
-      setError(readableError(error));
-    } finally {
-      setWorking(false);
-      notify(false);
-    }
+    try { await action(); }
+    catch (reason) { setError(readableError(reason)); }
+    finally { setWorking(false); if (install) notify(false); }
   }
 
-  function search(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function browse(kind: ResourceType, value: string, start = 0) {
+    setDetail(undefined);
     setPlan(undefined);
-    void run(async () => setMatches(await window.launcher.searchMods(instance, query)));
-  }
-
-  function preview(project: string) {
-    setPlan(undefined);
-    void run(async () => setPlan(await window.launcher.previewMod(instance, project)));
-  }
-
-  function install() {
-    if (!plan) return;
-    const token = plan.token;
-    setPlan(undefined);
+    setList(undefined);
     void run(async () => {
-      const files = await window.launcher.installMod(instance, token);
-      setMessage(`已校验并安装 ${files.length} 个模组。下次启动游戏时加载。`);
+      setList(await window.launcher.browseResources(kind, value, start));
+      setOffset(start);
     });
+  }
+  useEffect(() => { browse('mod', ''); }, []);
+
+  function search(event: FormEvent) {
+    event.preventDefault();
+    browse(type, query);
+  }
+
+  async function translate(text: string) {
+    const translator = (window as TranslatorWindow).Translator;
+    const options = { sourceLanguage: 'en', targetLanguage: 'zh' };
+    if (!translator || await translator.availability(options) === 'unavailable') {
+      setFallback(true);
+      return;
+    }
+    const model = await translator.create(options);
+    try { setTranslation(await model.translate(text)); }
+    finally { model.destroy(); }
   }
 
   return <section className="panel resources">
-    <h2>Modrinth 模组</h2>
+    <div className="resource-header"><h2>资源中心</h2><small>Modrinth</small></div>
+    <div className="quick-actions" aria-label="资源类型">{Object.entries(resourceTypes).map(([kind, name]) =>
+      <button key={kind} type="button" disabled={busy} aria-pressed={kind === type} onClick={() => {
+        setType(kind as ResourceType); browse(kind as ResourceType, query);
+      }}>{name}</button>)}</div>
     <form onSubmit={search}>
-      <label>搜索兼容的 Fabric 模组<input type="search" maxLength={100} value={query}
+      <label>搜索{resourceTypes[type]}<input type="search" maxLength={100} value={query}
         onChange={event => setQuery(event.target.value)} /></label>
       <button disabled={busy}>搜索</button>
     </form>
-    <div className="quick-actions">
-      <button type="button" onClick={() => preview('sodium')} disabled={busy}>预览 Sodium 安装</button>
-      <button type="button" onClick={() => preview('e4mc')} disabled={busy}>预览 e4mc 安装</button>
-    </div>
-    {matches?.length === 0 && <p>没有匹配的模组。</p>}
-    {!!matches?.length && <ul>{matches.map(result => <li key={result.id}>
-      <strong>{result.title}</strong><p>{result.description}</p>
-      <button type="button" onClick={() => preview(result.id)} disabled={busy}>预览安装</button>
-    </li>)}</ul>}
-    {plan && <section className="installation-plan">
-      <h3>确认安装以下模组</h3>
+    {detail ? <article className="resource-detail">
+      <button type="button" disabled={busy} onClick={() => { setDetail(undefined); setPlan(undefined); }}>返回列表</button>
+      <h3>{detail.title}</h3><p>{detail.description}</p>
+      {!!detail.versions.length && <p>支持版本：{detail.versions.join('、')}</p>}
+      {!!detail.gallery.length && <div className="gallery">{detail.gallery.map(item =>
+        <img key={item.url} src={item.url} alt={item.title || detail.title + '截图'} loading="lazy" referrerPolicy="no-referrer" />)}</div>}
+      {detail.body && <details><summary>完整说明</summary><p className="resource-text">{detail.body}</p></details>}
+      <div className="quick-actions">
+        {!!detail.description && <button disabled={busy} onClick={() => {
+          setFallback(false);
+          void run(async () => { try { await translate(detail.description); } catch { setFallback(true); } });
+        }}>翻译简介</button>}
+        {fallback && <button disabled={busy} onClick={() =>
+          void run(() => window.launcher.openTranslation(detail.description))}>在浏览器用 Google 翻译</button>}
+        <button disabled={busy || !instance} className="primary" onClick={() => {
+          if (instance) void run(async () => setPlan(await window.launcher.previewMod(instance, detail.id)));
+        }}>检查兼容性并预览安装</button>
+      </div>
+      {translation && <p lang="zh-CN">{translation}</p>}
+      <p>{instance ? '安装目标 · ' + instanceName : '先选择一个已安装的游戏实例，再安装资源。'}</p>
+    </article> : <>
+      {list?.items.length === 0 && <p>没有符合条件的资源。</p>}
+      {!!list?.items.length && <div className="resource-list">{list.items.map(item =>
+        <button className="resource-result" key={item.id} disabled={busy} onClick={() => {
+          setTranslation(''); setFallback(false);
+          void run(async () => setDetail(await window.launcher.resourceDetails(item.id)));
+        }}>
+          {item.icon && <img src={item.icon} alt="" loading="lazy" referrerPolicy="no-referrer" />}
+          <span><strong>{item.title}</strong><small>{item.description}</small></span>
+          <small>{new Intl.NumberFormat('zh-CN', { notation: 'compact' }).format(item.downloads)} 次下载</small>
+        </button>)}</div>}
+      {!!list?.items.length && <div className="quick-actions">
+        {offset > 0 && <button disabled={busy} onClick={() => browse(type, query, offset - 12)}>上一页</button>}
+        {offset + 12 < Math.min(list.total, 997) && <button disabled={busy} onClick={() => browse(type, query, offset + 12)}>下一页</button>}
+      </div>}
+    </>}
+    {plan && instance && <section className="installation-plan">
+      <h3>确认安装到 {instanceName}</h3>
       <ul>{plan.files.map((file, index) => <li key={index}>{file.title} · {file.version}</li>)}</ul>
-      <button type="button" className="primary" onClick={install} disabled={busy}>确认安装</button>
+      <button type="button" className="primary" disabled={busy} onClick={() => {
+        const token = plan.token;
+        setPlan(undefined);
+        void run(async () => {
+          await window.launcher.installMod(instance, token);
+          setMessage('已下载并通过校验。下次启动游戏时可使用。');
+        }, true);
+      }}>确认安装</button>
       <button type="button" className="secondary" onClick={() => setPlan(undefined)}>取消</button>
     </section>}
-    {working && <p role="status">正在处理 Modrinth 请求…</p>}
+    {working && <p role="status">正在处理资源…</p>}
     {message && <p role="status">{message}</p>}
     {error && <p className="error" role="alert">{error}</p>}
   </section>;

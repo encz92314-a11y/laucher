@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { accountStore, offlineAccount } from '../desktop/session.mjs';
 import { launchArguments } from '../desktop/game.mjs';
 
-test('offline sessions recover only a stored verified identity and omit online credentials', async t => {
+test('protected Microsoft profile survives restart and local offline names omit online credentials', async t => {
   const root = await mkdtemp(join(tmpdir(), 'zephyr-session-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const key = randomBytes(32);
@@ -34,11 +34,15 @@ test('offline sessions recover only a stored verified identity and omit online c
   const profile = { id: 'a'.repeat(32), name: 'TestPlayer', access: 'access', refresh: 'secret-test-refresh', clientId };
   assert.equal(await accounts.remember(profile), true);
   assert.doesNotMatch(await readFile(join(root, 'verified-account.json'), 'utf8'), /secret-test-refresh|TestPlayer/);
-  const offline = offlineAccount(await accountStore(root, storage).saved());
-  assert.deepEqual(offline, { id: profile.id, name: profile.name, skin: undefined, offline: true, access: '0' });
+  assert.equal((await accountStore(root, storage).saved()).id, profile.id);
+  const offline = offlineAccount('TestPlayer');
+  assert.match(offline.id, /^[a-f0-9]{32}$/);
+  assert.notEqual(offline.id, profile.id);
+  assert.equal(offlineAccount('TestPlayer').id, offline.id);
+  assert.throws(() => offlineAccount('a/b'), /离线昵称/);
   const args = launchArguments({ id: '26.3', type: 'release', assetIndex: { id: '0' }, libraries: [],
     arguments: { game: ['${auth_access_token}', '${user_type}'], jvm: [] }, mainClass: 'Client' }, root, offline);
-  assert.deepEqual(args.slice(-2), ['0', 'legacy']);
+  assert.deepEqual(args.slice(-3), ['0', 'legacy', '--disableMultiplayer']);
   await accounts.forget();
   assert.equal(await accounts.saved(), undefined);
 });

@@ -23,7 +23,7 @@ export function launchArguments(version, game, account, memory = 2, extra = []) 
     auth_player_name: account.name, auth_uuid: account.id, auth_access_token: account.access,
     version_name: version.id, game_directory: game, assets_root: assets,
     assets_index_name: version.assetIndex.id, user_type: account.offline ? 'legacy' : 'msa', user_properties: '{}', version_type: version.type,
-    auth_xuid: '', clientid: '', launcher_name: 'Zephyr', launcher_version: '0.2.3',
+    auth_xuid: '', clientid: '', launcher_name: 'Zephyr', launcher_version: '0.2.4',
     natives_directory: localPath(game, 'natives'), classpath: classpath.join(delimiter),
     library_directory: libraries, classpath_separator: delimiter,
   };
@@ -41,6 +41,7 @@ export function launchArguments(version, game, account, memory = 2, extra = []) 
     ...(logging ? [logging.argument.replace('${path}', localPath(game, `log_configs/${logging.file.id}`))] : []),
     version.mainClass,
     ...expand(version.arguments.game),
+    ...(account.offline ? ['--disableMultiplayer'] : []),
   ];
 }
 

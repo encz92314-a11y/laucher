@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { accountStore, offlineAccount } from './session.mjs';
 import { signIn, refreshSignIn } from './account.mjs';
+import { catalog } from './catalog.mjs';
+import { applyOnlineSkin, defaultSkins, skinPreview } from './skins.mjs';
 import { modrinth } from './modrinth.mjs';
 import { activatePreset, currentProfile, preparePreset, selectShader, shaders, systemProfile } from './performance.mjs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { launchGame } from './game.mjs';
 import { launcher, localPath } from './core.mjs';
 
@@ -66,11 +68,18 @@ app.whenReady().then(() => {
   const root = join(app.getPath('userData'), 'launcher-data');
   const service = launcher(root);
   const resources = modrinth();
+  const store = catalog();
+  let skinSelection;
   const accounts = accountStore(root, safeStorage);
   const publicAccount = value => ({ name: value.name, skin: value.skin, offline: !!value.offline });
   let pending;
+  async function installedInstance(id) {
+    const instance = (await service.list()).find(row => row.id === id && row.installed);
+    if (!instance) throw new Error('请先安装一个游戏实例');
+    return instance;
+  }
   async function fabricInstance(id) {
-    const instance = (await service.list()).find(row => row.id === id);
+    const instance = await installedInstance(id);
     if (instance?.loader !== 'fabric' || !instance.installed) throw new Error('请先安装 Fabric 实例');
     return instance;
   }
@@ -120,14 +129,23 @@ app.whenReady().then(() => {
     list: () => service.list(),
     versions: () => service.versions(),
     create: (_, name, version, loader) => service.create(name, version, loader),
-    async searchMods(_, id, query) {
-      return resources.search(query, (await fabricInstance(id)).version);
+    browseResources: (_, type, query, offset) => store.browse(type, query, offset),
+    resourceDetails: (_, project) => store.details(project),
+    async openTranslation(_, description) {
+      if (typeof description !== 'string' || description.length > 5000) throw new Error('请选择较短的资源简介');
+      const url = new URL('https://translate.google.com/');
+      url.search = new URLSearchParams({ sl: 'auto', tl: 'zh-CN', text: description, op: 'translate' }).toString();
+      await shell.openExternal(url.href);
     },
     async previewMod(_, id, project) {
-      const plan = await resources.plan(project, (await fabricInstance(id)).version);
+      const detail = await store.details(project);
+      const instance = await installedInstance(id);
+      if (detail.kind === 'mod' && instance.loader !== 'fabric') throw new Error('请选择已安装的 Fabric 实例');
+      const plan = detail.kind === 'mod' ? await resources.plan(project, instance.version) : await store.plan(project, instance);
       const token = randomUUID();
       pending = { id, token, plan };
-      return { token, files: plan.map(({ title, version }) => ({ title, version })) };
+      const files = Array.isArray(plan) ? plan : [plan];
+      return { token, files: files.map(({ title, version }) => ({ title, version })) };
     },
     async installMod(event, id, token) {
       if (game || starting || installing) throw new Error('请先退出游戏并等待安装任务结束');
@@ -136,14 +154,49 @@ app.whenReady().then(() => {
       const { plan } = pending;
       pending = undefined;
       try {
-        const instance = await fabricInstance(id);
-        return await resources.install(plan, directory(instance), value => report(event, value));
+        const instance = await installedInstance(id);
+        const update = value => report(event, value);
+        return Array.isArray(plan) ? await resources.install(plan, directory(instance), update)
+          : await store.install(plan, directory(instance), instance, update);
       } finally {
         installing = false;
       }
     },
+    async chooseSkin(_, instanceId, builtInIndex) {
+      skinSelection = undefined;
+      if (Number.isInteger(builtInIndex)) {
+        const instance = await installedInstance(instanceId);
+        const entry = defaultSkins(localPath(directory(instance), 'client.jar'))[builtInIndex];
+        if (!entry) throw new Error('此版本没有该官方皮肤');
+        skinSelection = Buffer.from(entry.skin.split(',')[1], 'base64');
+        return { skin: entry.skin, variant: entry.variant };
+      }
+      const result = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [{ name: 'PNG 皮肤', extensions: ['png'] }] });
+      if (result.canceled) return null;
+      const path = result.filePaths[0];
+      if ((await stat(path)).size > 1024 * 1024) throw new Error('皮肤 PNG 必须小于 1 MB');
+      const data = await readFile(path);
+      const skin = skinPreview(data);
+      skinSelection = data;
+      return { skin, variant: 'classic' };
+    },
+    async listDefaultSkins(_, id) {
+      return defaultSkins(localPath(directory(await installedInstance(id)), 'client.jar'));
+    },
+    async uploadSkin(_, variant) {
+      if (!account || account.offline || !skinSelection) throw new Error('请先登录 Microsoft 并选择皮肤');
+      if (signingIn || starting || game) throw new Error('请等待登录或游戏任务结束');
+      const selected = skinSelection;
+      signingIn = true;
+      try {
+        if (account.expires < Date.now() + 30_000) account = await refreshSignIn(account);
+        account.skin = await applyOnlineSkin(account.access, selected, variant);
+        await accounts.remember(account).catch(() => false);
+        return publicAccount(account);
+      } finally { signingIn = false; }
+    },
     async accountSettings() {
-      return { clientId: await accounts.clientId(), offlineAvailable: !!await accounts.saved() };
+      return { clientId: await accounts.clientId() };
     },
     async signIn(_, clientId) {
       if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
@@ -152,17 +205,15 @@ app.whenReady().then(() => {
         const chosen = clientId || await accounts.clientId();
         if (clientId) await accounts.configure(clientId);
         account = await signIn(chosen, url => shell.openExternal(url));
-        const offlineAvailable = await accounts.remember(account).catch(() => false);
-        return { ...publicAccount(account), offlineAvailable };
+        await accounts.remember(account).catch(() => false);
+        return publicAccount(account);
       } finally {
         signingIn = false;
       }
     },
-    async signInOffline() {
+    async signInOffline(_, nickname) {
       if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
-      const saved = await accounts.saved();
-      if (!saved) throw new Error('请先联网登录并完成正版验证，启用本机离线模式');
-      account = offlineAccount(saved);
+      account = offlineAccount(nickname);
       return publicAccount(account);
     },
     async signOut() {

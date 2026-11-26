@@ -117,3 +117,18 @@ header small { display: inline-block; margin-top: 4px; font-size: 10px; }
 }
 .sign-in-form { grid-template-columns: minmax(180px, 340px) auto; justify-content: start; }
 @media (max-width: 800px) { .sign-in-form { grid-template-columns: 1fr; } }
+.resource-header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.resources form { margin-top: 15px; }
+.resource-list { display: grid; gap: 8px; margin-top: 18px; }
+.resource-result { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; }
+.resource-result > span { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.resource-result > small { text-align: right; }
+.resource-result img { width: 40px; height: 40px; object-fit: cover; border-radius: 7px; }
+.resource-detail { margin-top: 20px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 7px; margin: 12px 0; }
+.gallery img { width: 100%; max-height: 280px; object-fit: contain; background: var(--control); border-radius: 7px; }
+.resource-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.summary, summary { cursor: pointer; padding-block: 8px; }
+.skin-panel { margin-top: 14px; }
+.skin-previews { display: flex; flex-wrap: wrap; gap: 20px; }
+.skin-sheet { image-rendering: pixelated; width: 192px; max-width: 100%; background: var(--control); border-radius: 8px; }
