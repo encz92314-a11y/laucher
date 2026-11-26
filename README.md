@@ -26,7 +26,7 @@ npm start
 
 ## Microsoft 开发授权
 
-1. 在 Microsoft Entra 应用注册中创建支持个人 Microsoft 账号的应用，配置移动和桌面应用的公共客户端平台。注册与实现一致的回环重定向 URI `http://127.0.0.1/callback`。运行时使用系统选定的回环端口。若门户不接受 IP 回环 URI，可使用应用清单配置该 URI。
+1. 在 Microsoft Entra 应用注册中创建支持个人 Microsoft 账号的应用，配置移动和桌面应用的公共客户端平台。在「身份验证 → 添加平台 → 移动和桌面应用程序」注册 `http://localhost/callback`。使用自定义重定向 URI 输入框保存；Zephyr 在运行时选择本机回环端口，Microsoft 对 localhost 回调忽略端口匹配。
 2. 按 Minecraft 的第三方应用授权要求提交自己的客户端 ID，确认它获准调用 Minecraft Services。
 3. 将已获授权的应用程序客户端 ID 放进启动器进程的环境变量 `MINECRAFT_CLIENT_ID`。登录使用系统浏览器和 PKCE，无需提供密码或客户端密钥。当前会话凭据仅驻留在启动器内存中，关闭后需重新登录。
 
@@ -88,3 +88,7 @@ Microsoft 登录默认弹出独立窗口，请求微软官方账号选择页面�
 ## Zephyr 0.2.8
 
 发布包预置 Zephyr 的 Microsoft 应用客户端 ID。直接点击「打开 Microsoft 登录窗口」即可开始。此前保存在本机的自定义客户端 ID 和发布时的仓库配置仍可以覆盖默认值。Microsoft 的账号所有权校验继续生效。
+
+## Zephyr 0.2.9
+
+Microsoft 登录窗使用原生关闭按钮，支持 Esc 或 macOS 的 ⌘W。关闭时取消当前授权请求。若微软报 `invalid_request: redirect_uri`，需由应用注册所有者在 Microsoft Entra 把 `http://localhost/callback` 加到「移动和桌面应用程序」重定向 URI。账号设置可以复制此地址。

@@ -5,8 +5,9 @@ import { validClientId } from './session.mjs';
 
 const microsoft = 'https://login.microsoftonline.com/consumers/oauth2/v2.0';
 const minecraft = 'https://api.minecraftservices.com';
+export const registeredRedirect = 'http://localhost/callback';
 
-async function json(url, { body, access } = {}) {
+async function json(url, { body, access, signal } = {}) {
   const headers = { Accept: 'application/json' };
   if (access) headers.Authorization = `Bearer ${access}`;
   if (body) headers['Content-Type'] = body instanceof URLSearchParams
@@ -16,9 +17,10 @@ async function json(url, { body, access } = {}) {
     response = await fetch(url, {
       method: body ? 'POST' : 'GET', headers, redirect: 'error',
       body: body instanceof URLSearchParams ? body : body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(25_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000),
     });
   } catch {
+    if (signal?.aborted) throw new Error('已关闭 Microsoft 登录窗口');
     throw new Error(`连接认证服务失败（${new URL(url).hostname}）`);
   }
   if (!response.ok) throw new Error(`认证服务请求失败（${new URL(url).hostname} HTTP ${response.status}）`);
@@ -70,10 +72,23 @@ export async function signIn(clientId, openBrowser, signal) {
   if (signal?.aborted) throw new Error('已关闭 Microsoft 登录窗口');
   signal?.addEventListener('abort', abort, { once: true });
   const server = createServer((incoming, outgoing) => {
-    const url = new URL(incoming.url, 'http://localhost');
+    const registered = new URL(registeredRedirect);
+    if (incoming.headers.host !== `localhost:${server.address().port}`) {
+      outgoing.writeHead(400).end();
+      return;
+    }
+    if (!URL.canParse(incoming.url, registered)) {
+      outgoing.writeHead(400).end();
+      return;
+    }
+    const url = new URL(incoming.url, registered);
+    if (url.origin !== registered.origin) {
+      outgoing.writeHead(400).end();
+      return;
+    }
     const returned = url.searchParams.get('state');
     const candidate = Buffer.from(returned ?? '');
-    if (incoming.method !== 'GET' || url.pathname !== '/callback' ||
+    if (incoming.method !== 'GET' || url.pathname !== registered.pathname ||
         candidate.length !== state.length || !timingSafeEqual(candidate, Buffer.from(state))) {
       outgoing.writeHead(400).end();
       return;
@@ -88,7 +103,10 @@ export async function signIn(clientId, openBrowser, signal) {
   try {
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
-    const redirect = `http://127.0.0.1:${server.address().port}/callback`;
+    // Microsoft's dynamic port exception applies to the hostname localhost.
+    const address = new URL(registeredRedirect);
+    address.port = String(server.address().port);
+    const redirect = address.href;
     const authorize = new URL(microsoft + '/authorize');
     authorize.search = new URLSearchParams({
       client_id: clientId, response_type: 'code', redirect_uri: redirect,
@@ -97,13 +115,17 @@ export async function signIn(clientId, openBrowser, signal) {
     timeout = setTimeout(() => fail(new Error('登录超时')), 180_000);
     await openBrowser(authorize.toString(), redirect);
     const token = await json(microsoft + '/token', {
-      body: new URLSearchParams({
+      signal, body: new URLSearchParams({
         client_id: clientId, code: await callback, redirect_uri: redirect,
         grant_type: 'authorization_code', code_verifier: verifier,
       }),
     });
     if (!token.access_token) throw new Error('Microsoft 返回的凭据不完整');
-    return { ...(await minecraftIdentity(token.access_token)), clientId, refresh: token.refresh_token };
+    return { ...(await minecraftIdentity(token.access_token, (url, options) => json(url, { ...options, signal }))),
+      clientId, refresh: token.refresh_token };
+  } catch (error) {
+    if (signal?.aborted) throw new Error('已关闭 Microsoft 登录窗口');
+    throw error;
   } finally {
     signal?.removeEventListener('abort', abort);
     clearTimeout(timeout);

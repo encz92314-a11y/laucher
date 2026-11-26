@@ -20,7 +20,7 @@ export async function officialFetch(url, headers = {}) {
       address.port || !trustedHosts.has(address.hostname)) {
     throw new Error('下载地址不属于受信任的资源服务器');
   }
-  const response = await fetch(address, { redirect: 'error', headers: { 'User-Agent': 'Zephyr/0.2.8', ...headers }, signal: AbortSignal.timeout(120_000) });
+  const response = await fetch(address, { redirect: 'error', headers: { 'User-Agent': 'Zephyr/0.2.9', ...headers }, signal: AbortSignal.timeout(120_000) });
   if (!response.ok) throw new Error(`资源请求失败（HTTP ${response.status}）`);
   return response;
 }

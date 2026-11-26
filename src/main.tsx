@@ -60,7 +60,8 @@ declare global {
       previewMod(id: string, source: ResourceSource, project: string): Promise<{ token: string; files: InstallFile[] }>;
       installMod(id: string, token: string): Promise<InstallFile[]>;
       install(id: string): Promise<Instance[]>;
-      accountSettings(): Promise<{ clientId: string }>;
+      accountSettings(): Promise<{ clientId: string; redirect: string }>;
+      copyMicrosoftRedirect(): Promise<void>;
       signIn(clientId: string, external?: boolean): Promise<Player>;
       relayStatus(): Promise<RelayState>;
       relayInstalled(id: string): Promise<boolean>;
@@ -91,6 +92,8 @@ function App() {
   const [version, setVersion] = useState('');
   const [allVersions, setAllVersions] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);
+  const [microsoftRedirect, setMicrosoftRedirect] = useState('');
+  const [redirectCopied, setRedirectCopied] = useState(false);
   const [clientId, setClientId] = useState('');
   const [nickname, setNickname] = useState(localStorage.getItem('nickname') ?? '');
   const [configureMicrosoft, setConfigureMicrosoft] = useState(false);
@@ -133,6 +136,7 @@ function App() {
   useEffect(() => {
     window.launcher.accountSettings().then(settings => {
       setClientId(settings.clientId);
+      setMicrosoftRedirect(settings.redirect);
     }).catch(error => setError(readableError(error)));
     window.launcher.system().then(setHardware).catch(() => {});
     window.launcher.list().then(setInstances).catch(error => setError(readableError(error)));
@@ -277,6 +281,12 @@ function App() {
                 onChange={event => setClientId(event.target.value)} /></label>
               <button disabled={locked || !clientId.trim()}>保存并登录</button>
             </form>
+            {microsoftRedirect && <div className="quick-actions">
+              <span>Entra 桌面应用回调地址 <code>{microsoftRedirect}</code></span>
+              <button type="button" onClick={() => void window.launcher.copyMicrosoftRedirect()
+                .then(() => setRedirectCopied(true), reason => setError(readableError(reason)))}>
+                {redirectCopied ? '已复制' : '复制回调地址'}</button>
+            </div>}
           </details>
           <div className="installation-plan">
             <h3>离线游玩</h3>

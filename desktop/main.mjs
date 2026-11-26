@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { accountStore, offlineAccount } from './session.mjs';
-import { signIn, refreshSignIn } from './account.mjs';
+import { signIn, refreshSignIn, registeredRedirect } from './account.mjs';
 import { curseforge, curseSettings } from './curseforge.mjs';
 import { catalog } from './catalog.mjs';
 import { applyOnlineSkin, defaultSkins, skinPreview } from './skins.mjs';
@@ -46,8 +46,8 @@ app.on('second-instance', () => {
 
 function authorizationWindow(callback, abort) {
   const login = new BrowserWindow({
-    parent: window, modal: true, width: 860, height: 710, title: '在 Zephyr 登录 Microsoft',
-    autoHideMenuBar: true,
+    parent: window, width: 860, height: 710, title: '在 Zephyr 登录 Microsoft',
+    closable: true, frame: true, titleBarStyle: 'default', autoHideMenuBar: true,
     webPreferences: { partition: 'persist:zephyr-microsoft', sandbox: true, devTools: false,
       contextIsolation: true, nodeIntegration: false, webviewTag: false },
   });
@@ -60,6 +60,13 @@ function authorizationWindow(callback, abort) {
   });
   webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   login.on('page-title-updated', event => event.preventDefault());
+  webContents.on('before-input-event', (event, input) => {
+    const closeShortcut = (process.platform === 'darwin' ? input.meta : input.control) && input.key.toLowerCase() === 'w';
+    if (input.type === 'keyDown' && (input.key === 'Escape' || closeShortcut)) {
+      event.preventDefault();
+      login.close();
+    }
+  });
   login.once('closed', () => abort.abort());
   return login;
 }
@@ -80,7 +87,13 @@ function openWindow() {
       for (let i = 0; i < 40 && !document.querySelector('h1'); i++) await new Promise(resolve => setTimeout(resolve, 100));
       return Boolean(document.querySelector('h1') && await window.launcher.system() && typeof require === 'undefined');
     })()`);
-    app.exit(ready ? 0 : 1);
+    const abort = new AbortController();
+    const login = authorizationWindow('http://localhost:3000/callback', abort);
+    const canClose = login.isClosable() && !login.isModal();
+    const closed = new Promise(resolve => login.once('closed', resolve));
+    login.close();
+    await closed;
+    app.exit(ready && canClose && abort.signal.aborted ? 0 : 1);
   }).catch(error => {
     console.error(error);
     if (process.argv.includes('--smoke-test')) app.exit(1);
@@ -298,8 +311,9 @@ app.whenReady().then(() => {
       } finally { signingIn = false; }
     },
     async accountSettings() {
-      return { clientId: await accounts.clientId() };
+      return { clientId: await accounts.clientId(), redirect: registeredRedirect };
     },
+    copyMicrosoftRedirect: () => clipboard.writeText(registeredRedirect),
     async signIn(_, clientId, external) {
       if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
       signingIn = true;

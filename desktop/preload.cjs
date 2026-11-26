@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('launcher', {
   uploadSkin: variant => ipcRenderer.invoke('launcher:uploadSkin', variant),
   previewMod: (id, source, project) => ipcRenderer.invoke('launcher:previewMod', id, source, project),
   installMod: (id, token) => ipcRenderer.invoke('launcher:installMod', id, token),
+  copyMicrosoftRedirect: () => ipcRenderer.invoke('launcher:copyMicrosoftRedirect'),
   accountSettings: () => ipcRenderer.invoke('launcher:accountSettings'),
   signIn: (clientId, external) => ipcRenderer.invoke('launcher:signIn', clientId, external),
   relayStatus: () => ipcRenderer.invoke('launcher:relayStatus'),
