@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { readableError } from './errors';
 
 export const resourceTypes = { mod: '模组', shader: '光影', resourcepack: '材质包', modpack: '整合包' } as const;
+export type ResourceSource = 'modrinth' | 'curseforge';
 export type ResourceType = keyof typeof resourceTypes;
 export type Resource = { id: string; title: string; description: string; icon?: string; downloads: number };
 export type ResourceDetails = Omit<Resource, 'downloads'> & {
@@ -19,6 +20,9 @@ type TranslatorWindow = Window & {
 export function Resources({ instance, instanceName, disabled, notify }: {
   instance?: string; instanceName?: string; disabled: boolean; notify: (active: boolean) => void;
 }) {
+  const [source, setSource] = useState<ResourceSource>('modrinth');
+  const [curseConfigured, setCurseConfigured] = useState(false);
+  const [curseKey, setCurseKey] = useState('');
   const [type, setType] = useState<ResourceType>('mod');
   const [query, setQuery] = useState('');
   const [list, setList] = useState<{ total: number; items: Resource[] }>();
@@ -42,12 +46,12 @@ export function Resources({ instance, instanceName, disabled, notify }: {
     finally { setWorking(false); if (install) notify(false); }
   }
 
-  function browse(kind: ResourceType, value: string, start = 0) {
+  function browse(kind: ResourceType, value: string, start = 0, platform = source) {
     setDetail(undefined);
     setPlan(undefined);
     setList(undefined);
     void run(async () => {
-      setList(await window.launcher.browseResources(kind, value, start));
+      setList(await window.launcher.browseResources(platform, kind, value, start));
       setOffset(start);
     });
   }
@@ -71,7 +75,39 @@ export function Resources({ instance, instanceName, disabled, notify }: {
   }
 
   return <section className="panel resources">
-    <div className="resource-header"><h2>资源中心</h2><small>Modrinth</small></div>
+    <div className="resource-header"><h2>资源中心</h2></div>
+    <div className="quick-actions" aria-label="资源来源">
+      <button disabled={busy} aria-pressed={source === 'modrinth'} onClick={() => {
+        setSource('modrinth');
+        browse(type, query, 0, 'modrinth');
+      }}>Modrinth</button>
+      <button disabled={busy} aria-pressed={source === 'curseforge'} onClick={() => {
+        setSource('curseforge');
+        setDetail(undefined); setPlan(undefined); setList(undefined);
+        void run(async () => {
+          const configured = await window.launcher.curseConfigured();
+          setCurseConfigured(configured);
+          if (configured) {
+            setList(await window.launcher.browseResources('curseforge', type, query, 0));
+            setOffset(0);
+          }
+        });
+      }}>CurseForge</button>
+    </div>
+    {source === 'curseforge' && <details open={!curseConfigured || undefined}>
+      <summary>CurseForge 下载设置</summary>
+      <p>浏览和下载需要 CurseForge 官方 API Key。密钥只保存在本机系统加密存储。</p>
+      <form onSubmit={event => { event.preventDefault(); void run(async () => {
+        await window.launcher.configureCurse(curseKey.trim());
+        setCurseKey(''); setCurseConfigured(true);
+        setList(await window.launcher.browseResources('curseforge', type, query, 0));
+        setOffset(0);
+      }); }}>
+        <label>CurseForge API Key<input type="password" autoComplete="off" maxLength={512}
+          value={curseKey} onChange={event => setCurseKey(event.target.value)} /></label>
+        <button disabled={busy || !curseKey.trim()}>保存并浏览</button>
+      </form>
+    </details>}
     <div className="quick-actions" aria-label="资源类型">{Object.entries(resourceTypes).map(([kind, name]) =>
       <button key={kind} type="button" disabled={busy} aria-pressed={kind === type} onClick={() => {
         setType(kind as ResourceType); browse(kind as ResourceType, query);
@@ -95,8 +131,10 @@ export function Resources({ instance, instanceName, disabled, notify }: {
         }}>翻译简介</button>}
         {fallback && <button disabled={busy} onClick={() =>
           void run(() => window.launcher.openTranslation(detail.description))}>在浏览器用 Google 翻译</button>}
+        {source === 'curseforge' && <button disabled={busy} onClick={() =>
+          void run(() => window.launcher.openCurseProject(detail.id))}>打开 CurseForge 官方页面</button>}
         <button disabled={busy || !instance} className="primary" onClick={() => {
-          if (instance) void run(async () => setPlan(await window.launcher.previewMod(instance, detail.id)));
+          if (instance) void run(async () => setPlan(await window.launcher.previewMod(instance, source, detail.id)));
         }}>检查兼容性并预览安装</button>
       </div>
       {translation && <p lang="zh-CN">{translation}</p>}
@@ -106,7 +144,7 @@ export function Resources({ instance, instanceName, disabled, notify }: {
       {!!list?.items.length && <div className="resource-list">{list.items.map(item =>
         <button className="resource-result" key={item.id} disabled={busy} onClick={() => {
           setTranslation(''); setFallback(false);
-          void run(async () => setDetail(await window.launcher.resourceDetails(item.id)));
+          void run(async () => setDetail(await window.launcher.resourceDetails(source, item.id)));
         }}>
           {item.icon && <img src={item.icon} alt="" loading="lazy" referrerPolicy="no-referrer" />}
           <span><strong>{item.title}</strong><small>{item.description}</small></span>

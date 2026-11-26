@@ -68,3 +68,7 @@ npm start
 - 在线登录使用 Microsoft 官方浏览器页面，保留所有权验证。发布者可在 GitHub 仓库 Actions **变量**配置公开的 `MINECRAFT_CLIENT_ID`，为用户预配已获授权的客户端 ID。未预配时可在「账号 → Microsoft 应用配置」填入自己的应用客户端 ID。
 - 离线游玩输入昵称即可启动已安装的本地单人游戏，无需 Microsoft 账号。离线 UUID 由昵称确定，保留相同昵称可继续使用原有身份。离线模式不携带正版在线令牌。
 - 账号页支持当前皮肤预览、本地 PNG 预览和提交至正版账号。游戏自带皮肤从已安装的正版来源客户端 JAR 读取，取决于目标版本，不额外随启动器分发贴图。离线模式仅预览皮肤。
+
+## Zephyr 0.2.5
+
+资源中心可在 Modrinth 和 CurseForge 间切换。CurseForge 使用官方 API，需在应用内输入自己的 API Key，或在启动器进程中配置 `CURSEFORGE_API_KEY`。应用内设置使用系统钥匙串加密，API Key 不随安装包分发。作者限制第三方下载时，可以打开官方项目页。CurseForge 整合包须与目标 Minecraft/Fabric Loader 版本匹配，遇到未授权文件或覆盖冲突会停止安装。

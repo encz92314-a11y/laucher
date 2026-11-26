@@ -142,6 +142,10 @@ export async function installPack(archive, game, instance, request, receive) {
     if (overrideBytes > 96 * 1024 * 1024 || files.size >= 1800 || files.has(path)) throw new Error('整合包覆盖文件太大或重复');
     files.set(path, { item });
   }
+  await commitPack(files, game, request, receive);
+}
+
+export async function commitPack(files, game, request, receive) {
   const targetNames = new Set();
   for (const path of files.keys()) {
     const target = localPath(game, path);

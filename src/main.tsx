@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { Resource, ResourceDetails, ResourceType } from './resources';
+import type { Resource, ResourceDetails, ResourceSource, ResourceType } from './resources';
 import { Skins } from './skins';
 import type { DefaultSkin, Skin } from './skins';
 import type { Preset } from './profiles';
@@ -36,13 +36,16 @@ declare global {
       list(): Promise<Instance[]>;
       versions(): Promise<Version[]>;
       create(name: string, version: string, loader: Loader): Promise<Instance[]>;
-      browseResources(kind: ResourceType, query: string, offset: number): Promise<{ total: number; items: Resource[] }>;
-      resourceDetails(project: string): Promise<ResourceDetails>;
+      curseConfigured(): Promise<boolean>;
+      configureCurse(key: string): Promise<void>;
+      openCurseProject(id: string): Promise<void>;
+      browseResources(source: ResourceSource, kind: ResourceType, query: string, offset: number): Promise<{ total: number; items: Resource[] }>;
+      resourceDetails(source: ResourceSource, project: string): Promise<ResourceDetails>;
       openTranslation(description: string): Promise<void>;
       chooseSkin(id?: string, index?: number): Promise<Skin | null>;
       listDefaultSkins(id: string): Promise<DefaultSkin[]>;
       uploadSkin(variant: Skin['variant']): Promise<Player>;
-      previewMod(id: string, project: string): Promise<{ token: string; files: InstallFile[] }>;
+      previewMod(id: string, source: ResourceSource, project: string): Promise<{ token: string; files: InstallFile[] }>;
       installMod(id: string, token: string): Promise<InstallFile[]>;
       install(id: string): Promise<Instance[]>;
       accountSettings(): Promise<{ clientId: string }>;

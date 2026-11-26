@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { accountStore, offlineAccount } from './session.mjs';
 import { signIn, refreshSignIn } from './account.mjs';
+import { curseforge, curseSettings } from './curseforge.mjs';
 import { catalog } from './catalog.mjs';
 import { applyOnlineSkin, defaultSkins, skinPreview } from './skins.mjs';
 import { modrinth } from './modrinth.mjs';
@@ -69,6 +70,13 @@ app.whenReady().then(() => {
   const service = launcher(root);
   const resources = modrinth();
   const store = catalog();
+  const curseKey = curseSettings(root, safeStorage);
+  const curse = curseforge(() => curseKey.get());
+  function repository(source) {
+    if (source === 'modrinth') return store;
+    if (source === 'curseforge') return curse;
+    throw new Error('未知资源来源');
+  }
   let skinSelection;
   const accounts = accountStore(root, safeStorage);
   const publicAccount = value => ({ name: value.name, skin: value.skin, offline: !!value.offline });
@@ -129,21 +137,26 @@ app.whenReady().then(() => {
     list: () => service.list(),
     versions: () => service.versions(),
     create: (_, name, version, loader) => service.create(name, version, loader),
-    browseResources: (_, type, query, offset) => store.browse(type, query, offset),
-    resourceDetails: (_, project) => store.details(project),
+    browseResources: (_, source, type, query, offset) => repository(source).browse(type, query, offset),
+    resourceDetails: (_, source, project) => repository(source).details(project),
+    async curseConfigured() { return !!await curseKey.get(); },
+    configureCurse: (_, key) => curseKey.save(key),
+    async openCurseProject(_, project) { await shell.openExternal(await curse.openPage(project)); },
     async openTranslation(_, description) {
       if (typeof description !== 'string' || description.length > 5000) throw new Error('请选择较短的资源简介');
       const url = new URL('https://translate.google.com/');
       url.search = new URLSearchParams({ sl: 'auto', tl: 'zh-CN', text: description, op: 'translate' }).toString();
       await shell.openExternal(url.href);
     },
-    async previewMod(_, id, project) {
-      const detail = await store.details(project);
+    async previewMod(_, id, source, project) {
+      const platform = repository(source);
+      const detail = await platform.details(project);
       const instance = await installedInstance(id);
       if (detail.kind === 'mod' && instance.loader !== 'fabric') throw new Error('请选择已安装的 Fabric 实例');
-      const plan = detail.kind === 'mod' ? await resources.plan(project, instance.version) : await store.plan(project, instance);
+      const plan = source === 'modrinth' && detail.kind === 'mod'
+        ? await resources.plan(project, instance.version) : await platform.plan(project, instance);
       const token = randomUUID();
-      pending = { id, token, plan };
+      pending = { id, token, plan, source };
       const files = Array.isArray(plan) ? plan : [plan];
       return { token, files: files.map(({ title, version }) => ({ title, version })) };
     },
@@ -151,11 +164,12 @@ app.whenReady().then(() => {
       if (game || starting || installing) throw new Error('请先退出游戏并等待安装任务结束');
       if (!pending || pending.preset || pending.id !== id || pending.token !== token) throw new Error('请重新预览安装清单');
       installing = true;
-      const { plan } = pending;
+      const { plan, source } = pending;
       pending = undefined;
       try {
         const instance = await installedInstance(id);
         const update = value => report(event, value);
+        if (source === 'curseforge') return await curse.install(plan, instance, directory(instance), update);
         return Array.isArray(plan) ? await resources.install(plan, directory(instance), update)
           : await store.install(plan, directory(instance), instance, update);
       } finally {

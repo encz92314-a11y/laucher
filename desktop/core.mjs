@@ -11,6 +11,7 @@ const operatingSystems = { win32: 'windows', darwin: 'osx', linux: 'linux' };
 const trustedHosts = new Set([
   'piston-meta.mojang.com', 'piston-data.mojang.com', 'launchermeta.mojang.com',
   'launcher.mojang.com', 'meta.fabricmc.net', 'maven.fabricmc.net', 'api.modrinth.com', 'cdn.modrinth.com', 'libraries.minecraft.net', 'resources.download.minecraft.net',
+  'edge.forgecdn.net', 'media.forgecdn.net', 'mediafiles.forgecdn.net', 'mediafilez.forgecdn.net',
 ]);
 
 export async function officialFetch(url, headers = {}) {
@@ -19,7 +20,7 @@ export async function officialFetch(url, headers = {}) {
       address.port || !trustedHosts.has(address.hostname)) {
     throw new Error('下载地址不属于受信任的资源服务器');
   }
-  const response = await fetch(address, { redirect: 'error', headers: { 'User-Agent': 'Zephyr/0.2.4', ...headers }, signal: AbortSignal.timeout(120_000) });
+  const response = await fetch(address, { redirect: 'error', headers: { 'User-Agent': 'Zephyr/0.2.5', ...headers }, signal: AbortSignal.timeout(120_000) });
   if (!response.ok) throw new Error(`资源请求失败（HTTP ${response.status}）`);
   return response;
 }
