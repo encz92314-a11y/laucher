@@ -29,3 +29,10 @@ jobs:
           path: docs
       - uses: actions/deploy-pages@v4
         id: deployment
+      - name: Verify public homepage
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --max-time 12 --retry 6 --retry-delay 4 --retry-all-errors "${SITE_URL%/}/" -o "$RUNNER_TEMP/zephyr-index.html"
+          grep -Fq '<title>Zephyr · Minecraft Java 版启动器</title>' "$RUNNER_TEMP/zephyr-index.html"
