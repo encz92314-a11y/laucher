@@ -72,3 +72,9 @@ npm start
 ## Zephyr 0.2.5
 
 资源中心可在 Modrinth 和 CurseForge 间切换。CurseForge 使用官方 API，需在应用内输入自己的 API Key，或在启动器进程中配置 `CURSEFORGE_API_KEY`。应用内设置使用系统钥匙串加密，API Key 不随安装包分发。作者限制第三方下载时，可以打开官方项目页。CurseForge 整合包须与目标 Minecraft/Fabric Loader 版本匹配，遇到未授权文件或覆盖冲突会停止安装。
+
+## Zephyr 0.2.6
+
+Microsoft 登录默认弹出独立窗口，请求微软官方账号选择页面，保留系统浏览器入口。首次使用仍需完成 Microsoft 应用配置。窗口不加载启动器的预加载脚本，登录流程保留 PKCE 和正版校验。
+
+「好友联机」可为已安装的 Fabric 实例下载 e4mc。只有从联机页选择启动联机实例时，Zephyr 管理的 e4mc 目录才会加载。房主需在游戏内手动对局域网开放，地址出现后只分享给认识的人。加入者可在支持 Quick Play 的已安装实例里使用好友提供的 e4mc 地址。两条联机路径均要求在线正版账号。「离线游玩」继续面向本地单人。陶瓦尚未集成。

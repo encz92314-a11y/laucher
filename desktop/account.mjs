@@ -57,7 +57,7 @@ export async function minecraftIdentity(microsoftToken, request = json) {
   };
 }
 
-export async function signIn(clientId, openBrowser) {
+export async function signIn(clientId, openBrowser, signal) {
   if (!validClientId(clientId)) throw new Error('请先配置已获授权的 Microsoft 客户端 ID');
   const state = randomBytes(32).toString('base64url');
   const verifier = randomBytes(64).toString('base64url');
@@ -66,6 +66,9 @@ export async function signIn(clientId, openBrowser) {
   let fail;
   const callback = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
   callback.catch(() => {});
+  const abort = () => fail(new Error('已关闭 Microsoft 登录窗口'));
+  if (signal?.aborted) throw new Error('已关闭 Microsoft 登录窗口');
+  signal?.addEventListener('abort', abort, { once: true });
   const server = createServer((incoming, outgoing) => {
     const url = new URL(incoming.url, 'http://localhost');
     const returned = url.searchParams.get('state');
@@ -89,10 +92,10 @@ export async function signIn(clientId, openBrowser) {
     const authorize = new URL(microsoft + '/authorize');
     authorize.search = new URLSearchParams({
       client_id: clientId, response_type: 'code', redirect_uri: redirect,
-      scope: 'XboxLive.signin offline_access', state, code_challenge: challenge, code_challenge_method: 'S256',
+      scope: 'XboxLive.signin offline_access', prompt: 'select_account', state, code_challenge: challenge, code_challenge_method: 'S256',
     }).toString();
     timeout = setTimeout(() => fail(new Error('登录超时')), 180_000);
-    await openBrowser(authorize.toString());
+    await openBrowser(authorize.toString(), redirect);
     const token = await json(microsoft + '/token', {
       body: new URLSearchParams({
         client_id: clientId, code: await callback, redirect_uri: redirect,
@@ -102,6 +105,7 @@ export async function signIn(clientId, openBrowser) {
     if (!token.access_token) throw new Error('Microsoft 返回的凭据不完整');
     return { ...(await minecraftIdentity(token.access_token)), clientId, refresh: token.refresh_token };
   } finally {
+    signal?.removeEventListener('abort', abort);
     clearTimeout(timeout);
     server.close();
     server.closeAllConnections();

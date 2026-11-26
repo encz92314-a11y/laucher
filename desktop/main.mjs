@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -10,7 +10,9 @@ import { catalog } from './catalog.mjs';
 import { applyOnlineSkin, defaultSkins, skinPreview } from './skins.mjs';
 import { modrinth } from './modrinth.mjs';
 import { activatePreset, currentProfile, preparePreset, selectShader, shaders, systemProfile } from './performance.mjs';
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
+import { allowedAuthNavigation } from './oauth-window.mjs';
+import { relayAddress } from './multiplayer.mjs';
 import { launchGame } from './game.mjs';
 import { launcher, localPath } from './core.mjs';
 
@@ -40,6 +42,26 @@ app.on('second-instance', () => {
   if (window.isMinimized()) window.restore();
   window.focus();
 });
+
+function authorizationWindow(callback, abort) {
+  const login = new BrowserWindow({
+    parent: window, modal: true, width: 860, height: 710, title: '在 Zephyr 登录 Microsoft',
+    autoHideMenuBar: true,
+    webPreferences: { partition: 'persist:zephyr-microsoft', sandbox: true, devTools: false,
+      contextIsolation: true, nodeIntegration: false, webviewTag: false },
+  });
+  const { webContents } = login;
+  webContents.session.setPermissionRequestHandler((_, __, done) => done(false));
+  webContents.session.setPermissionCheckHandler(() => false);
+  webContents.on('will-navigate', event => { if (!allowedAuthNavigation(event.url, callback)) event.preventDefault(); });
+  webContents.on('will-redirect', event => {
+    if (event.isMainFrame && !allowedAuthNavigation(event.url, callback)) event.preventDefault();
+  });
+  webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  login.on('page-title-updated', event => event.preventDefault());
+  login.once('closed', () => abort.abort());
+  return login;
+}
 
 function openWindow() {
   window = new BrowserWindow({
@@ -81,6 +103,19 @@ app.whenReady().then(() => {
   const accounts = accountStore(root, safeStorage);
   const publicAccount = value => ({ name: value.name, skin: value.skin, offline: !!value.offline });
   let pending;
+  let relay = { state: 'idle' };
+  const relayDirectory = instance => localPath(directory(instance), 'network/e4mc');
+  const setRelay = update => {
+    relay = update;
+    if (window && !window.isDestroyed()) window.webContents.send('launcher:relay', update);
+  };
+  async function hasRelay(instance) {
+    const mods = localPath(relayDirectory(instance), 'mods');
+    return (await readdir(mods).catch(error => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    })).some(name => name.startsWith('modrinth-qANg5Jrr-') && name.endsWith('.jar'));
+  }
   async function installedInstance(id) {
     const instance = (await service.list()).find(row => row.id === id && row.installed);
     if (!instance) throw new Error('请先安装一个游戏实例');
@@ -97,6 +132,21 @@ app.whenReady().then(() => {
   };
   const handlers = {
     system: () => systemProfile(),
+    relayStatus: () => relay,
+    async relayInstalled(_, id) { return hasRelay(await fabricInstance(id)); },
+    copyRelay() {
+      if (relay.state !== 'shared' || !relay.address) throw new Error('当前没有可分享的联机地址');
+      clipboard.writeText(relay.address);
+    },
+    async installRelay(event, id) {
+      if (game || starting || installing) throw new Error('请先退出游戏并等待安装任务结束');
+      installing = true;
+      try {
+        const instance = await fabricInstance(id);
+        const plan = await resources.plan('qANg5Jrr', instance.version);
+        await resources.install(plan, relayDirectory(instance), value => report(event, value));
+      } finally { installing = false; }
+    },
     async profile(_, id) {
       return (await currentProfile(directory(await fabricInstance(id)))) ?? 'off';
     },
@@ -212,16 +262,23 @@ app.whenReady().then(() => {
     async accountSettings() {
       return { clientId: await accounts.clientId() };
     },
-    async signIn(_, clientId) {
+    async signIn(_, clientId, external) {
       if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
       signingIn = true;
+      let login;
+      const abort = new AbortController();
       try {
         const chosen = clientId || await accounts.clientId();
         if (clientId) await accounts.configure(clientId);
-        account = await signIn(chosen, url => shell.openExternal(url));
+        account = await signIn(chosen, async (url, callback) => {
+          if (external === true) return shell.openExternal(url);
+          login = authorizationWindow(callback, abort);
+          await login.loadURL(url);
+        }, abort.signal);
         await accounts.remember(account).catch(() => false);
         return publicAccount(account);
       } finally {
+        if (login && !login.isDestroyed()) login.close();
         signingIn = false;
       }
     },
@@ -235,7 +292,7 @@ app.whenReady().then(() => {
       await accounts.forget();
       account = undefined;
     },
-    async play(event, id) {
+    async play(event, id, host = false, joinAddress) {
       if (installing || signingIn) throw new Error('请等待安装或登录完成');
       if (game || starting) throw new Error('游戏已经启动或正在启动');
       starting = true;
@@ -246,10 +303,36 @@ app.whenReady().then(() => {
           account = await refreshSignIn(account);
           await accounts.remember(account).catch(() => false);
         }
-        game = await launchGame(directory(instance), account, instance.loader,
-          instance.loader === 'fabric' ? await currentProfile(directory(instance)) : undefined);
+        if ((host || joinAddress !== undefined) && (!account || account.offline)) throw new Error('联机请先登录 Microsoft');
+        let network;
+        if (host === true) {
+          if (instance.loader !== 'fabric' || !(await hasRelay(instance))) throw new Error('请先为此 Fabric 实例安装 e4mc');
+          const mods = localPath(relayDirectory(instance), 'mods');
+          const bundled = await readdir(mods);
+          const ordinary = await readdir(localPath(directory(instance), 'mods')).catch(error => {
+            if (error.code === 'ENOENT') return [];
+            throw error;
+          });
+          if (bundled.some(name => ordinary.some(file => file.startsWith(name.split('-').slice(0, 2).join('-') + '-')))) {
+            throw new Error('实例中已有重复的联机模组，请先移除普通 mods 目录中的重复版本');
+          }
+          setRelay({ state: 'waiting' });
+          network = { mods, onRelay: setRelay };
+        } else if (joinAddress !== undefined) {
+          const join = relayAddress(joinAddress);
+          if (!join) throw new Error('请输入好友发给你的 e4mc.link 地址');
+          network = { join };
+        }
+        try {
+          game = await launchGame(directory(instance), account, instance.loader,
+            instance.loader === 'fabric' ? await currentProfile(directory(instance)) : undefined, network);
+        } catch (error) {
+          if (host) setRelay({ state: 'idle' });
+          throw error;
+        }
         game.once('close', code => {
           game = undefined;
+          setRelay({ state: 'idle' });
           if (!event.sender.isDestroyed()) event.sender.send('launcher:game-exit', code);
         });
       } finally {

@@ -22,10 +22,19 @@ contextBridge.exposeInMainWorld('launcher', {
   previewMod: (id, source, project) => ipcRenderer.invoke('launcher:previewMod', id, source, project),
   installMod: (id, token) => ipcRenderer.invoke('launcher:installMod', id, token),
   accountSettings: () => ipcRenderer.invoke('launcher:accountSettings'),
-  signIn: clientId => ipcRenderer.invoke('launcher:signIn', clientId),
+  signIn: (clientId, external) => ipcRenderer.invoke('launcher:signIn', clientId, external),
+  relayStatus: () => ipcRenderer.invoke('launcher:relayStatus'),
+  relayInstalled: id => ipcRenderer.invoke('launcher:relayInstalled', id),
+  installRelay: id => ipcRenderer.invoke('launcher:installRelay', id),
+  copyRelay: () => ipcRenderer.invoke('launcher:copyRelay'),
+  onRelay: callback => {
+    const listener = (_, state) => callback(state);
+    ipcRenderer.on('launcher:relay', listener);
+    return () => ipcRenderer.removeListener('launcher:relay', listener);
+  },
   signInOffline: nickname => ipcRenderer.invoke('launcher:signInOffline', nickname),
   signOut: () => ipcRenderer.invoke('launcher:signOut'),
-  play: id => ipcRenderer.invoke('launcher:play', id),
+  play: (id, host, address) => ipcRenderer.invoke('launcher:play', id, host, address),
   onGameExit: callback => {
     const handler = (_, code) => callback(code);
     ipcRenderer.on('launcher:game-exit', handler);

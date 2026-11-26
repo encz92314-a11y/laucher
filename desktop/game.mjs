@@ -5,6 +5,7 @@ import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
 import { allowed, localPath } from './core.mjs';
 
+import { observeRelay, quickConnectArguments } from './multiplayer.mjs';
 import { gameProfile, systemProfile } from './performance.mjs';
 
 const execute = promisify(execFile);
@@ -23,7 +24,7 @@ export function launchArguments(version, game, account, memory = 2, extra = []) 
     auth_player_name: account.name, auth_uuid: account.id, auth_access_token: account.access,
     version_name: version.id, game_directory: game, assets_root: assets,
     assets_index_name: version.assetIndex.id, user_type: account.offline ? 'legacy' : 'msa', user_properties: '{}', version_type: version.type,
-    auth_xuid: '', clientid: '', launcher_name: 'Zephyr', launcher_version: '0.2.5',
+    auth_xuid: '', clientid: '', launcher_name: 'Zephyr', launcher_version: '0.2.6',
     natives_directory: localPath(game, 'natives'), classpath: classpath.join(delimiter),
     library_directory: libraries, classpath_separator: delimiter,
   };
@@ -68,19 +69,28 @@ export async function selectJava(major, { platform = process.platform, arch = pr
   throw new Error(`找不到兼容的 Java ${major}${platform === 'darwin' && arch === 'arm64' ? '（Apple 芯片 ARM64）' : ''}。请安装对应版本，或配置 MINECRAFT_JAVA。`);
 }
 
-export async function launchGame(game, account, loader, preset) {
+export async function launchGame(game, account, loader, preset, multiplayer) {
   if (!account || (!account.offline && account.expires <= Date.now())) throw new Error('请先登录拥有 Minecraft Java 版的 Microsoft 账号');
   const version = JSON.parse(await readFile(localPath(game, loader === 'fabric' ? 'fabric.json' : 'version.json'), 'utf8'));
   const java = await selectJava(version.javaVersion?.majorVersion ?? 8);
   const extra = loader === 'fabric' ? await gameProfile(game, preset) : [];
+  if (multiplayer && account.offline) throw new Error('联机请先登录 Microsoft');
+  if (multiplayer?.mods) {
+    if (multiplayer.mods.includes(delimiter)) throw new Error('实例路径含 Fabric 的路径分隔符');
+    const modArgument = extra.findIndex(argument => argument.startsWith('-Dfabric.addMods='));
+    if (modArgument === -1) extra.push('-Dfabric.addMods=' + multiplayer.mods);
+    else extra[modArgument] += delimiter + multiplayer.mods;
+  }
   const args = launchArguments(version, game, account, systemProfile().memory, extra);
+  if (multiplayer?.join) args.push(...quickConnectArguments(version, multiplayer.join));
   await mkdir(localPath(game, 'natives'), { recursive: true });
   const child = spawn(java, args, { cwd: game, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   const log = createWriteStream(localPath(game, 'launcher-game.log'), { flags: 'w', mode: 0o600 });
   log.on('error', () => {});
   // Minecraft itself manages its log files. Drain JVM output without persisting
   // arguments or potentially sensitive strings from startup diagnostics.
-  child.stdout.resume();
+  if (multiplayer?.onRelay) observeRelay(child.stdout, multiplayer.onRelay);
+  else child.stdout.resume();
   child.stderr.resume();
   child.once('close', (code, signal) => log.end(`Game exited (${code ?? signal ?? 'unknown'})\n`));
   await new Promise((resolve, reject) => {

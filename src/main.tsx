@@ -4,15 +4,18 @@ import { createRoot } from 'react-dom/client';
 import type { Resource, ResourceDetails, ResourceSource, ResourceType } from './resources';
 import { Skins } from './skins';
 import type { DefaultSkin, Skin } from './skins';
+import type { RelayState } from './multiplayer';
+const Multiplayer = lazy(() => import('./multiplayer').then(module => ({ default: module.Multiplayer })));
 import type { Preset } from './profiles';
 const Resources = lazy(() => import('./resources').then(module => ({ default: module.Resources })));
 const Profiles = lazy(() => import('./profiles').then(module => ({ default: module.Profiles })));
-type Page = 'home' | 'instances' | 'performance' | 'mods' | 'account';
+type Page = 'home' | 'instances' | 'performance' | 'mods' | 'account' | 'multiplayer';
 const navigation = [
   ['home', '首页', 'M3 10l9-7 9 7v10H4V10m5 10v-7h6v7'],
   ['instances', '实例', 'M12 3l9 5v8l-9 5-9-5V8l9-5zm-9 5l9 5 9-5m-9 5v8'],
   ['performance', '性能', 'M4 19a9 9 0 1116 0H4zm8-3l4-5'],
   ['mods', '资源中心', 'M5 4h14v16H5zM8 8h8M8 12h8m-8 4h4'],
+  ['multiplayer', '好友联机', 'M7 9a4 4 0 118 0 4 4 0 01-8 0zm-4 12a8 8 0 0116 0m0-13 3 3-3 3'],
 ] as const;
 import './style.css';
 import { readableError } from './errors';
@@ -49,10 +52,15 @@ declare global {
       installMod(id: string, token: string): Promise<InstallFile[]>;
       install(id: string): Promise<Instance[]>;
       accountSettings(): Promise<{ clientId: string }>;
-      signIn(clientId: string): Promise<Player>;
+      signIn(clientId: string, external?: boolean): Promise<Player>;
+      relayStatus(): Promise<RelayState>;
+      relayInstalled(id: string): Promise<boolean>;
+      installRelay(id: string): Promise<void>;
+      copyRelay(): Promise<void>;
+      onRelay(callback: (state: RelayState) => void): () => void;
       signInOffline(nickname: string): Promise<Player>;
       signOut(): Promise<void>;
-      play(id: string): Promise<void>;
+      play(id: string, host?: boolean, address?: string): Promise<void>;
       onGameExit(callback: (code: number | null) => void): () => void;
       onProgress(callback: (progress: Progress) => void): () => void;
     };
@@ -147,8 +155,8 @@ function App() {
     }
   }
 
-  async function changeAccount(mode: 'online' | 'offline' | 'forget') {
-    setBusy(mode === 'online' ? '请在系统浏览器中完成 Microsoft 登录' : '正在切换账号');
+  async function changeAccount(mode: 'online' | 'offline' | 'forget', external = false) {
+    setBusy(mode === 'online' ? '请在 Microsoft 窗口中完成登录' : '正在切换账号');
     setError('');
     try {
       if (mode === 'forget') {
@@ -159,7 +167,7 @@ function App() {
         localStorage.setItem('nickname', nickname.trim());
         setPage('home');
       } else {
-        const account = await window.launcher.signIn(clientId.trim());
+        const account = await window.launcher.signIn(clientId.trim(), external);
         setPlayer(account);
         setPage('home');
       }
@@ -170,13 +178,13 @@ function App() {
     }
   }
 
-  async function play() {
+  async function play(host = false, address?: string) {
     if (!current) return;
     setBusy('正在启动游戏');
     setPlaying(true);
     setError('');
     try {
-      await window.launcher.play(current.id);
+      await window.launcher.play(current.id, host, address);
     } catch (error) {
       setPlaying(false);
       setError(readableError(error));
@@ -221,7 +229,7 @@ function App() {
         <p>{current ? `${current.version} · ${current.installed ? '游戏文件已下载' : '待安装'}` :
           '从 Mojang 官方版本目录创建一个独立游戏实例。'}</p>
         {current?.installed && player && <button className="primary" type="button"
-          disabled={locked} onClick={play}>{playing ? '游戏运行中' : '启动游戏'}</button>}
+          disabled={locked} onClick={() => void play()}>{playing ? '游戏运行中' : '启动游戏'}</button>}
         {current && <button className={current.installed && player ? 'secondary' : 'primary'} type="button" onClick={install} disabled={locked}>
           {current.installed ? '校验游戏文件' : '下载游戏文件'}
         </button>}
@@ -235,7 +243,9 @@ function App() {
           <button className="primary" disabled={locked} onClick={() => {
             if (clientId.trim()) void changeAccount('online');
             else { setConfigureMicrosoft(true); setError('首次使用需要设置 Minecraft Services 已授权的应用客户端 ID。'); }
-          }}>在浏览器登录 Microsoft</button>
+          }}>打开 Microsoft 登录窗口</button>
+          {clientId.trim() && <button className="secondary" disabled={locked}
+            onClick={() => void changeAccount('online', true)}>使用系统浏览器</button>}
           <details open={configureMicrosoft || undefined}>
             <summary>Microsoft 应用配置</summary>
             <form className="sign-in-form" onSubmit={event => { event.preventDefault(); void changeAccount('online'); }}>
@@ -293,6 +303,11 @@ function App() {
         {page === 'mods' &&
           <Resources key={current?.id} instance={current?.installed ? current.id : undefined}
             instanceName={current?.name} disabled={!!busy || playing}
+            notify={active => { setProgress(undefined); setResourceBusy(active); }} />}
+        {page === 'multiplayer' &&
+          <Multiplayer key={current?.id} id={current?.installed ? current.id : undefined} fabric={!!supported}
+            online={!!player && !player.offline} disabled={locked}
+            signIn={() => setPage('account')} play={play}
             notify={active => { setProgress(undefined); setResourceBusy(active); }} />}
       </Suspense>
       </div>
