@@ -34,5 +34,14 @@ jobs:
           SITE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location --max-time 12 --retry 6 --retry-delay 4 --retry-all-errors "${SITE_URL%/}/" -o "$RUNNER_TEMP/zephyr-index.html"
-          grep -Fq '<title>Zephyr · Minecraft Java 版启动器</title>' "$RUNNER_TEMP/zephyr-index.html"
+          version_line="$(grep -F '当前预览版' docs/index.html)"
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error --location --max-time 12 "${SITE_URL%/}/?deployment=$GITHUB_SHA" -o "$RUNNER_TEMP/zephyr-index.html" &&
+               grep -Fq '<title>Zephyr · Minecraft Java 版启动器</title>' "$RUNNER_TEMP/zephyr-index.html" &&
+               grep -Fq "$version_line" "$RUNNER_TEMP/zephyr-index.html"; then
+              exit 0
+            fi
+            sleep 4
+          done
+          echo 'The current release version was not found on the published homepage.' >&2
+          exit 1
