@@ -1,5 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('launcher', {
+  appearance: () => ipcRenderer.invoke('launcher:appearance'),
+  appearancePreview: values => ipcRenderer.invoke('launcher:appearancePreview', values),
+  saveAppearance: values => ipcRenderer.invoke('launcher:saveAppearance', values),
+  pickWallpaper: () => ipcRenderer.invoke('launcher:pickWallpaper'),
+  resetAppearanceImage: () => ipcRenderer.invoke('launcher:resetAppearanceImage'),
+  openWallpapers: () => ipcRenderer.invoke('launcher:openWallpapers'),
   system: () => ipcRenderer.invoke('launcher:system'),
   profile: id => ipcRenderer.invoke('launcher:profile', id),
   previewProfile: (id, preset) => ipcRenderer.invoke('launcher:previewProfile', id, preset),

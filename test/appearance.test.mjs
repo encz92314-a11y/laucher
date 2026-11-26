@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { appearanceDefault, appearanceStore, validateAppearance } from '../desktop/appearance.mjs';
+import { totalPages, visiblePages, pageSize, maxOffset } from '../src/pagination.ts';
+
+test('appearance persists custom colors, fully transparent mode and imported wallpapers', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'zephyr-appearance-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const preferences = appearanceStore(directory);
+  assert.deepEqual((await preferences.load()).values, appearanceDefault);
+  const source = Buffer.from([255, 216, 255, 217]);
+  const stored = await preferences.storeImage(source);
+  const values = { ...appearanceDefault, wallpaper: true, accent: 'custom', customColor: '#00aaff', opacity: 0 };
+  await preferences.save(values);
+  assert.deepEqual((await appearanceStore(directory).load()), { values, image: stored });
+  assert.deepEqual(await readFile(join(directory, 'wallpaper.jpg')), source);
+  await preferences.removeImage();
+  assert.equal((await preferences.load()).values.wallpaper, false);
+  assert.throws(() => validateAppearance({ ...values, opacity: -1 }), /外观设置/);
+  assert.throws(() => validateAppearance({ ...values, customColor: 'url(https://example.com)' }), /外观设置/);
+});
+
+test('resource pagination stays in both provider limits and keeps the current page reachable', () => {
+  assert.equal(totalPages(0), 1);
+  assert.equal(totalPages(24), 2);
+  assert.equal(totalPages(25), 3);
+  const capped = totalPages(100_000);
+  assert.equal((capped - 1) * pageSize, maxOffset);
+  for (let current = 1; current <= capped; current++) {
+    const shown = visiblePages(current, capped).filter(Boolean);
+    assert.ok(shown.includes(current));
+    assert.deepEqual(shown, [...new Set(shown)]);
+    assert.ok(shown.every(page => page >= 1 && page <= capped));
+  }
+});

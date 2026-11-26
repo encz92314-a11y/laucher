@@ -1,21 +1,24 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Resource, ResourceDetails, ResourceSource, ResourceType } from './resources';
 import { Skins } from './skins';
 import type { DefaultSkin, Skin } from './skins';
+import { AppearanceSettings, defaultAppearance } from './appearance';
+import type { Appearance } from './appearance';
 import type { RelayState } from './multiplayer';
 const Multiplayer = lazy(() => import('./multiplayer').then(module => ({ default: module.Multiplayer })));
 import type { Preset } from './profiles';
 const Resources = lazy(() => import('./resources').then(module => ({ default: module.Resources })));
 const Profiles = lazy(() => import('./profiles').then(module => ({ default: module.Profiles })));
-type Page = 'home' | 'instances' | 'performance' | 'mods' | 'account' | 'multiplayer';
+type Page = 'home' | 'instances' | 'performance' | 'mods' | 'account' | 'multiplayer' | 'appearance';
 const navigation = [
   ['home', '首页', 'M3 10l9-7 9 7v10H4V10m5 10v-7h6v7'],
   ['instances', '实例', 'M12 3l9 5v8l-9 5-9-5V8l9-5zm-9 5l9 5 9-5m-9 5v8'],
   ['performance', '性能', 'M4 19a9 9 0 1116 0H4zm8-3l4-5'],
   ['mods', '资源中心', 'M5 4h14v16H5zM8 8h8M8 12h8m-8 4h4'],
   ['multiplayer', '好友联机', 'M7 9a4 4 0 118 0 4 4 0 01-8 0zm-4 12a8 8 0 0116 0m0-13 3 3-3 3'],
+  ['appearance', '外观', 'M12 3a9 9 0 100 18h1a2 2 0 000-4 2 2 0 010-4h5a3 3 0 003-3c0-4-4-7-9-7zM7 10h.01m3-3h.01m4 0h.01m3 2h.01'],
 ] as const;
 import './style.css';
 import { readableError } from './errors';
@@ -29,6 +32,12 @@ type Progress = { completed: number; total: number; bytesPerSecond: number };
 declare global {
   interface Window {
     launcher: {
+      appearance(): Promise<{ values: Appearance; image?: string }>;
+      appearancePreview(values: Appearance): Promise<void>;
+      saveAppearance(values: Appearance): Promise<void>;
+      pickWallpaper(): Promise<string | null>;
+      resetAppearanceImage(): Promise<void>;
+      openWallpapers(): Promise<void>;
       system(): Promise<{ memory: number; reducedEffects: boolean }>;
       profile(id: string): Promise<Preset>;
       previewProfile(id: string, preset: Preset): Promise<{ token: string; files: InstallFile[]; skipped: { project: string; reason: string }[] }>;
@@ -68,6 +77,8 @@ declare global {
 }
 
 function App() {
+  const [appearance, setAppearance] = useState(defaultAppearance);
+  const [wallpaper, setWallpaper] = useState<string>();
   const [page, setPage] = useState<Page>('home');
   const [theme, setTheme] = useState(localStorage.getItem('theme') ?? 'system');
   const [hardware, setHardware] = useState<{ memory: number; reducedEffects: boolean }>();
@@ -108,6 +119,16 @@ function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    window.launcher.appearance().then(state => { setAppearance(state.values); setWallpaper(state.image); })
+      .catch(reason => setError(readableError(reason)));
+  }, []);
+
+  function changeAppearance(value: Appearance) {
+    setAppearance(value);
+    void window.launcher.appearancePreview(value).catch(reason => setError(readableError(reason)));
+  }
 
   useEffect(() => {
     window.launcher.accountSettings().then(settings => {
@@ -196,7 +217,10 @@ function App() {
   const locked = !!busy || playing || resourceBusy;
   const supported = current?.loader === 'fabric' && current.installed;
   const transfer = resourceBusy || busy === '正在安装游戏文件';
-  return <div className="layout" data-reduced={hardware?.reducedEffects ?? false}>
+  return <div className="layout" data-reduced={hardware?.reducedEffects ?? false}
+    data-style={appearance.style} data-accent={appearance.accent} data-transparent={appearance.opacity === 0}
+    style={{ '--surface-opacity': appearance.opacity + '%', '--custom-accent': appearance.customColor } as CSSProperties}>
+    {wallpaper && appearance.wallpaper && <img className="wallpaper" alt="" src={wallpaper} style={{ opacity: appearance.imageOpacity / 100 }} />}
     <aside>
       <header><img src="./launcher-mark.png" alt="" /><strong>Zephyr<br /><small>Minecraft 启动器</small></strong></header>
       <nav aria-label="主导航">{navigation.map(([value, label, path]) =>
@@ -269,11 +293,13 @@ function App() {
           online={!!player && !player.offline} disabled={locked}
           update={skin => setPlayer(value => value ? { ...value, skin } : value)} />
       </>}
+      {page === 'appearance' && <AppearanceSettings values={appearance} image={wallpaper}
+        update={changeAppearance} setImage={setWallpaper} />}
       {page === 'instances' && <section className="panel">
         <h2>创建实例</h2>
         <form onSubmit={create}>
           <label>实例名称<input value={name} onChange={event => setName(event.target.value)}
-            maxLength={80} placeholder="例如 生存世界" required /></label>
+            maxLength={80} required /></label>
           <label>游戏版本<select value={version} onChange={event => setVersion(event.target.value)}
             disabled={!versions.length || !!busy} required>
             {!versions.length && <option value="">版本目录不可用</option>}

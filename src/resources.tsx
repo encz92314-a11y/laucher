@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { pageSize, totalPages, visiblePages } from './pagination';
 import { readableError } from './errors';
 
 export const resourceTypes = { mod: '模组', shader: '光影', resourcepack: '材质包', modpack: '整合包' } as const;
@@ -24,6 +25,8 @@ export function Resources({ instance, instanceName, disabled, notify }: {
   const [curseConfigured, setCurseConfigured] = useState(false);
   const [curseKey, setCurseKey] = useState('');
   const [type, setType] = useState<ResourceType>('mod');
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [jump, setJump] = useState('');
   const [query, setQuery] = useState('');
   const [list, setList] = useState<{ total: number; items: Resource[] }>();
   const [offset, setOffset] = useState(0);
@@ -53,6 +56,8 @@ export function Resources({ instance, instanceName, disabled, notify }: {
     void run(async () => {
       setList(await window.launcher.browseResources(platform, kind, value, start));
       setOffset(start);
+      setSubmittedQuery(value);
+      setJump('');
     });
   }
   useEffect(() => { browse('mod', ''); }, []);
@@ -74,6 +79,13 @@ export function Resources({ instance, instanceName, disabled, notify }: {
     finally { model.destroy(); }
   }
 
+  const pages = totalPages(list?.total ?? 0);
+  const currentPage = offset / pageSize + 1;
+  const goTo = (page: number) => {
+    if (Number.isInteger(page) && page >= 1 && page <= pages && page !== currentPage) {
+      browse(type, submittedQuery, (page - 1) * pageSize);
+    }
+  };
   return <section className="panel resources">
     <div className="resource-header"><h2>资源中心</h2></div>
     <div className="quick-actions" aria-label="资源来源">
@@ -89,7 +101,7 @@ export function Resources({ instance, instanceName, disabled, notify }: {
           setCurseConfigured(configured);
           if (configured) {
             setList(await window.launcher.browseResources('curseforge', type, query, 0));
-            setOffset(0);
+            setOffset(0); setSubmittedQuery(query); setJump('');
           }
         });
       }}>CurseForge</button>
@@ -101,7 +113,7 @@ export function Resources({ instance, instanceName, disabled, notify }: {
         await window.launcher.configureCurse(curseKey.trim());
         setCurseKey(''); setCurseConfigured(true);
         setList(await window.launcher.browseResources('curseforge', type, query, 0));
-        setOffset(0);
+        setOffset(0); setSubmittedQuery(query); setJump('');
       }); }}>
         <label>CurseForge API Key<input type="password" autoComplete="off" maxLength={512}
           value={curseKey} onChange={event => setCurseKey(event.target.value)} /></label>
@@ -150,10 +162,22 @@ export function Resources({ instance, instanceName, disabled, notify }: {
           <span><strong>{item.title}</strong><small>{item.description}</small></span>
           <small>{new Intl.NumberFormat('zh-CN', { notation: 'compact' }).format(item.downloads)} 次下载</small>
         </button>)}</div>}
-      {!!list?.items.length && <div className="quick-actions">
-        {offset > 0 && <button disabled={busy} onClick={() => browse(type, query, offset - 12)}>上一页</button>}
-        {offset + 12 < Math.min(list.total, 997) && <button disabled={busy} onClick={() => browse(type, query, offset + 12)}>下一页</button>}
-      </div>}
+      {!!list?.items.length && pages > 1 && <nav className="pagination" aria-label="资源分页">
+        <p>第 {currentPage} / {pages} 页 · {list.total.toLocaleString('zh-CN')} 项</p>
+        <div className="page-numbers">
+          <button type="button" disabled={busy || currentPage === 1} onClick={() => goTo(currentPage - 1)}>上一页</button>
+          {visiblePages(currentPage, pages).map((page, index) => page ?
+            <button type="button" key={index} disabled={busy || page === currentPage}
+              aria-label={'第 ' + page + ' 页'} aria-current={page === currentPage ? 'page' : undefined}
+              onClick={() => goTo(page)}>{page}</button> : <span key={index} aria-hidden="true">…</span>)}
+          <button type="button" disabled={busy || currentPage === pages} onClick={() => goTo(currentPage + 1)}>下一页</button>
+        </div>
+        <form onSubmit={event => { event.preventDefault(); goTo(Number(jump)); }}>
+          <label>跳到<input aria-label="跳到页码" type="number" min={1} max={pages} step={1}
+            value={jump} onChange={event => setJump(event.target.value)} required /></label>
+          <button disabled={busy || !jump}>前往</button>
+        </form>
+      </nav>}
     </>}
     {plan && instance && <section className="installation-plan">
       <h3>确认安装到 {instanceName}</h3>

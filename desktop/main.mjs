@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, safeStorage, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -12,6 +12,7 @@ import { modrinth } from './modrinth.mjs';
 import { activatePreset, currentProfile, preparePreset, selectShader, shaders, systemProfile } from './performance.mjs';
 import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { allowedAuthNavigation } from './oauth-window.mjs';
+import { appearanceStore, validateAppearance } from './appearance.mjs';
 import { relayAddress } from './multiplayer.mjs';
 import { launchGame } from './game.mjs';
 import { launcher, localPath } from './core.mjs';
@@ -67,7 +68,7 @@ function openWindow() {
   window = new BrowserWindow({
     show: !process.argv.includes('--smoke-test'),
     width: 1120, height: 740, minWidth: 680, minHeight: 550,
-    backgroundColor: process.platform === 'darwin' ? '#00000000' : '#181622', autoHideMenuBar: true,
+    backgroundColor: '#00000000', transparent: true, autoHideMenuBar: true,
     ...(process.platform === 'darwin' ? { vibrancy: 'under-window', titleBarStyle: 'hiddenInset' } : {}),
     webPreferences: { preload: file('./preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
@@ -90,6 +91,18 @@ function openWindow() {
 app.whenReady().then(() => {
   const root = join(app.getPath('userData'), 'launcher-data');
   const service = launcher(root);
+  const appearance = appearanceStore(root);
+  let materialWindow;
+  let material;
+  function updateMaterial(values) {
+    if (process.platform === 'darwin' && window && !window.isDestroyed()) {
+      const next = values.style === 'glass' && values.opacity > 0 ? 'under-window' : null;
+      if (materialWindow === window && material === next) return;
+      window.setVibrancy(next);
+      materialWindow = window;
+      material = next;
+    }
+  }
   const resources = modrinth();
   const store = catalog();
   const curseKey = curseSettings(root, safeStorage);
@@ -132,6 +145,31 @@ app.whenReady().then(() => {
   };
   const handlers = {
     system: () => systemProfile(),
+    async appearance() {
+      const state = await appearance.load();
+      updateMaterial(state.values);
+      return state;
+    },
+    appearancePreview(_, values) { updateMaterial(validateAppearance(values)); },
+    async saveAppearance(_, values) {
+      await appearance.save(values);
+      updateMaterial(values);
+    },
+    async pickWallpaper() {
+      const result = await dialog.showOpenDialog(window, { properties: ['openFile'],
+        filters: [{ name: '背景图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+      if (result.canceled) return null;
+      const file = result.filePaths[0];
+      if ((await stat(file)).size > 32 * 1024 * 1024) throw new Error('请选择小于 32 MB 的图片');
+      const image = nativeImage.createFromPath(file);
+      if (image.isEmpty()) throw new Error('无法读取该图片');
+      const { width, height } = image.getSize();
+      const scaled = Math.max(width, height) <= 2560 ? image
+        : image.resize(width >= height ? { width: 2560 } : { height: 2560 });
+      return appearance.storeImage(scaled.toJPEG(86));
+    },
+    async resetAppearanceImage() { await appearance.removeImage(); },
+    async openWallpapers() { await shell.openExternal('https://www.minecraft.net/en-us/collectibles'); },
     relayStatus: () => relay,
     async relayInstalled(_, id) { return hasRelay(await fabricInstance(id)); },
     copyRelay() {
