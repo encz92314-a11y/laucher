@@ -80,14 +80,23 @@ jobs:
         run: |
           profile="$(mktemp -d)"
           LAUNCHER_SMOKE_DIRECTORY="$profile" "$LAUNCHER_EXECUTABLE" --smoke-test --disable-gpu
-      - name: Detach macOS disk image
-        if: always() && runner.os == 'macOS' && env.LAUNCHER_BUNDLE != ''
-        run: hdiutil detach "$RUNNER_TEMP/launcher-dmg"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.id }}
           path: downloads/*
           if-no-files-found: error
+      - name: Detach macOS disk image
+        if: always() && runner.os == 'macOS' && env.LAUNCHER_BUNDLE != ''
+        continue-on-error: true
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if hdiutil detach "$RUNNER_TEMP/launcher-dmg"; then exit 0; fi
+            sleep 2
+          done
+          echo "::warning::The temporary verification image could not be detached. The runner will be discarded."
+          exit 1
   release:
     needs: build
     if: always() && !cancelled()
