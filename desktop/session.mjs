@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { localPath, writeJSON } from './core.mjs';
 
 export const validClientId = value => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value);
@@ -8,20 +8,34 @@ export function accountStore(root, storage) {
   const file = localPath(root, 'verified-account.json');
   const configuration = localPath(root, 'microsoft.json');
   const secure = () => storage.isEncryptionAvailable() && storage.getSelectedStorageBackend?.() !== 'basic_text';
-  async function saved() {
-    if (!secure()) return undefined;
+  async function list() {
+    if (!secure()) return [];
     const raw = await readFile(file, 'utf8').catch(error => {
       if (error.code === 'ENOENT') return '';
       throw error;
     });
-    if (!raw) return undefined;
+    if (!raw) return [];
     try {
       const value = JSON.parse(storage.decryptString(Buffer.from(JSON.parse(raw).protected, 'base64')));
-      if (/^[a-f0-9]{32}$/i.test(value.id) && /^[a-z0-9_]{1,16}$/i.test(value.name)) return value;
+      const entries = Array.isArray(value.accounts) ? value.accounts : [value];
+      return entries.filter(entry => /^[a-f0-9]{32}$/i.test(entry?.id) && /^[a-z0-9_]{1,16}$/i.test(entry.name));
     } catch {
-      // Removing or changing the system keychain invalidates the cached login.
+      return [];
     }
-    return undefined;
+  }
+  async function persist(entries) {
+    const protectedValue = storage.encryptString(JSON.stringify({ accounts: entries }));
+    await writeJSON(file, { protected: protectedValue.toString('base64') });
+  }
+  let writes = Promise.resolve();
+  function update(change) {
+    const task = writes.then(async () => {
+      if (!secure()) return false;
+      await persist(change(await list()));
+      return true;
+    });
+    writes = task.catch(() => {});
+    return task;
   }
   return {
     async clientId() {
@@ -45,15 +59,16 @@ export function accountStore(root, storage) {
       if (!validClientId(clientId)) throw new Error('请输入有效的 Microsoft 应用程序客户端 ID');
       await writeJSON(configuration, { clientId });
     },
-    saved,
-    async remember(account) {
-      if (!secure()) return false;
+    list,
+    async saved() { return (await list())[0]; },
+    remember(account) {
       const { id, name, skin, refresh, clientId } = account;
-      const protectedValue = storage.encryptString(JSON.stringify({ id, name, skin, refresh, clientId }));
-      await writeJSON(file, { protected: protectedValue.toString('base64') });
-      return true;
+      return update(entries => [{ id, name, skin, refresh, clientId }, ...entries.filter(entry => entry.id !== id)]);
     },
-    forget: () => rm(file, { force: true }),
+    forget(id) {
+      if (id === undefined) return update(() => []);
+      return update(entries => entries.filter(entry => entry.id !== id));
+    },
   };
 }
 

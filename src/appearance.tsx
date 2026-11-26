@@ -1,21 +1,23 @@
 import { useState } from 'react';
+import { WallpaperCrop } from './wallpaper-crop';
 import { readableError } from './errors';
 
 export type Appearance = {
   style: 'glass' | 'clean' | 'solid';
   accent: 'violet' | 'ocean' | 'forest' | 'amber' | 'custom';
   customColor: string;
-  opacity: number;
+  windowOpacity: number;
   imageOpacity: number;
   wallpaper: boolean;
 };
 export const defaultAppearance: Appearance = {
-  style: 'glass', accent: 'violet', customColor: '#8464c5', opacity: 82, imageOpacity: 78, wallpaper: false,
+  style: 'glass', accent: 'violet', customColor: '#8464c5', windowOpacity: 100, imageOpacity: 78, wallpaper: false,
 };
 
 export function AppearanceSettings({ values, image, update, setImage }: {
   values: Appearance; image?: string; update: (value: Appearance) => void; setImage: (image?: string) => void;
 }) {
+  const [draft, setDraft] = useState<string>();
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -48,18 +50,18 @@ export function AppearanceSettings({ values, image, update, setImage }: {
         {values.accent === 'custom' && <label>自定义颜色<input type="color" value={values.customColor}
           onChange={event => change({ customColor: event.target.value })} /></label>}
       </div>
-      <label className="slider">界面不透明度 <output>{values.opacity}%</output>
-        <input type="range" min={0} max={100} value={values.opacity}
-          onChange={event => change({ opacity: Number(event.target.value) })} />
+      <label className="slider">整个窗口不透明度 <output>{values.windowOpacity}%</output>
+        <input type="range" min={40} max={100} value={values.windowOpacity}
+          onChange={event => change({ windowOpacity: Number(event.target.value) })} />
       </label>
-      <button type="button" onClick={() => change({ opacity: 0, wallpaper: false })}>完全透明</button>
+      <p>透明度会同时影响背景、文字和按钮。</p>
     </fieldset>
     <fieldset disabled={working}>
       <legend>背景图片</legend>
       <div className="quick-actions">
         <button onClick={() => void run(async () => {
           const selected = await window.launcher.pickWallpaper();
-          if (selected) { setImage(selected); change({ wallpaper: true }); }
+          if (selected) setDraft(selected);
         })}>选择本机图片</button>
         <button onClick={() => void run(() => window.launcher.openWallpapers())}>Minecraft 官方素材</button>
         {image && <button onClick={() => void run(async () => {
@@ -68,6 +70,13 @@ export function AppearanceSettings({ values, image, update, setImage }: {
           change({ wallpaper: false });
         })}>移除背景图</button>}
       </div>
+      {draft && <WallpaperCrop key={draft.length} source={draft} busy={working}
+        cancel={() => setDraft(undefined)} apply={jpeg => void run(async () => {
+          const cropped = await window.launcher.saveWallpaperCrop(jpeg);
+          setImage(cropped);
+          setDraft(undefined);
+          change({ wallpaper: true });
+        })} />}
       {image && <>
         <label className="check"><input type="checkbox" checked={values.wallpaper}
           onChange={event => change({ wallpaper: event.target.checked })} />显示背景图</label>

@@ -134,22 +134,21 @@ header small { display: inline-block; margin-top: 4px; font-size: 10px; }
 .skin-sheet { image-rendering: pixelated; width: 192px; max-width: 100%; background: var(--control); border-radius: 8px; }
 
 .layout {
-  background: color-mix(in srgb, var(--canvas) var(--surface-opacity, 82%), transparent);
+  background: color-mix(in srgb, var(--canvas) 100%, transparent);
 }
-.layout::before { opacity: var(--surface-opacity, 82%); }
+.layout::before { opacity: 100%; }
 .wallpaper { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; pointer-events: none; }
-.layout:has(.wallpaper) { background: transparent; }
 .layout :is(aside,.hero,.panel,.status-area) {
-  background: color-mix(in srgb, var(--glass) var(--surface-opacity, 82%), transparent);
+  background: color-mix(in srgb, var(--glass) 100%, transparent);
 }
 .layout button:not(.primary), .layout select, .layout input:not([type=checkbox]):not([type=range]) {
-  background-color: color-mix(in srgb, var(--control) var(--surface-opacity, 82%), transparent);
+  background-color: color-mix(in srgb, var(--control) 100%, transparent);
 }
 .layout[data-style="clean"] :is(aside,.hero,.panel,.status-area) {
   backdrop-filter: none; box-shadow: none; border-radius: 12px;
 }
 .layout[data-style="solid"] :is(aside,.hero,.panel,.status-area) {
-  background-color: color-mix(in srgb, var(--canvas) var(--surface-opacity, 82%), transparent);
+  background-color: color-mix(in srgb, var(--canvas) 100%, transparent);
   backdrop-filter: none; border-radius: 10px; box-shadow: 0 7px 18px var(--shadow);
 }
 .layout[data-accent="ocean"] { --accent: light-dark(#285c91,#acd8ff); --accent-ink: light-dark(#fff,#123454); }
@@ -158,15 +157,6 @@ header small { display: inline-block; margin-top: 4px; font-size: 10px; }
 .layout[data-accent="custom"] {
   --accent: light-dark(color-mix(in srgb, var(--custom-accent) 73%, black),color-mix(in srgb, var(--custom-accent) 65%, white));
   --accent-ink: light-dark(#fff,#160f24);
-}
-.layout[data-transparent="true"] { background: transparent; }
-.layout[data-transparent="true"] :is(aside,.hero,.panel,.status-area) {
-  backdrop-filter: none; box-shadow: none;
-}
-.layout[data-transparent="true"] .hero::after { box-shadow: none; }
-.layout[data-transparent="true"] .hero-mark, .layout[data-transparent="true"]::before { opacity: 0; }
-.layout[data-transparent="true"] :is(h1,h2,h3,p,label,small,nav button) {
-  text-shadow: 0 1px 4px light-dark(#fff,#000);
 }
 .settings-panel fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 16px 0; padding: 12px 16px; }
 .appearance-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
@@ -180,3 +170,11 @@ header small { display: inline-block; margin-top: 4px; font-size: 10px; }
 .pagination form { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .pagination label { display: flex; align-items: center; gap: 8px; }
 .pagination input { inline-size: 76px; }
+
+.wallpaper-crop { margin-block: 12px; }
+.wallpaper-crop canvas { display: block; width: 100%; max-height: 330px; object-fit: contain;
+  background: #151019; border: 1px solid var(--line); border-radius: 10px; }
+.saved-accounts { display: grid; gap: 7px; margin: 12px 0; }
+.saved-accounts button, .account-trigger { display: flex; align-items: center; gap: 8px; }
+.saved-accounts small { margin-inline-start: auto; }
+.avatar { flex: 0 0 24px; display: inline-grid; place-items: center; background: var(--control); }

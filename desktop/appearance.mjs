@@ -2,19 +2,20 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { localPath, writeJSON } from './core.mjs';
 
 export const appearanceDefault = Object.freeze({
-  style: 'glass', accent: 'violet', customColor: '#8464c5', opacity: 82, imageOpacity: 78, wallpaper: false,
+  style: 'glass', accent: 'violet', customColor: '#8464c5', windowOpacity: 100, imageOpacity: 78, wallpaper: false,
 });
 
 export function validateAppearance(input) {
   if (!input || !['glass', 'clean', 'solid'].includes(input.style) ||
       !['violet', 'ocean', 'forest', 'amber', 'custom'].includes(input.accent) ||
       !/^#[a-f0-9]{6}$/i.test(input.customColor ?? '') ||
-      ![input.opacity, input.imageOpacity].every(value => Number.isInteger(value) && value >= 0 && value <= 100) ||
+      !Number.isInteger(input.windowOpacity) || input.windowOpacity < 40 || input.windowOpacity > 100 ||
+      !Number.isInteger(input.imageOpacity) || input.imageOpacity < 0 || input.imageOpacity > 100 ||
       typeof input.wallpaper !== 'boolean') {
     throw new Error('外观设置无效');
   }
   return { style: input.style, accent: input.accent, customColor: input.customColor,
-    opacity: input.opacity, imageOpacity: input.imageOpacity, wallpaper: input.wallpaper };
+    windowOpacity: input.windowOpacity, imageOpacity: input.imageOpacity, wallpaper: input.wallpaper };
 }
 
 export function appearanceStore(root) {
@@ -28,7 +29,10 @@ export function appearanceStore(root) {
       });
       let values = appearanceDefault;
       if (raw) {
-        try { values = validateAppearance(JSON.parse(raw)); }
+        try {
+          const stored = JSON.parse(raw);
+          values = validateAppearance({ ...stored, windowOpacity: stored.windowOpacity ?? 100 });
+        }
         catch { /* Invalid or older preferences fall back to usable defaults. */ }
       }
       const jpeg = await readFile(image).catch(error => {

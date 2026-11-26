@@ -23,8 +23,36 @@ async function json(url, { body, access, signal } = {}) {
     if (signal?.aborted) throw new Error('已关闭 Microsoft 登录窗口');
     throw new Error(`连接认证服务失败（${new URL(url).hostname}）`);
   }
-  if (!response.ok) throw new Error(`认证服务请求失败（${new URL(url).hostname} HTTP ${response.status}）`);
+  if (!response.ok) throw authenticationError(url, response.status);
   return response.json();
+}
+
+const authenticationSteps = {
+  '/consumers/oauth2/v2.0/token': 'Microsoft 凭据交换',
+  '/user/authenticate': 'Xbox Live 登录',
+  '/xsts/authorize': 'Xbox 账号授权',
+  '/authentication/login_with_xbox': 'Minecraft Services 应用授权',
+  '/entitlements/mcstore': 'Minecraft Java 版所有权检查',
+  '/minecraft/profile': 'Minecraft 玩家资料',
+};
+
+export function authenticationError(address, status) {
+  const { pathname, hostname } = new URL(address);
+  const stage = authenticationSteps[pathname] ?? hostname;
+  let guidance = '';
+  if (pathname === '/authentication/login_with_xbox' && status === 403) {
+    guidance = '。微软登录已返回，但 Minecraft Services 拒绝了授权交换。请让应用注册所有者确认 Zephyr 客户端 ID 已获 Minecraft API 访问批准。';
+  } else if (pathname === '/entitlements/mcstore' && status === 403) {
+    guidance = '。Minecraft 拒绝读取此账号的所有权信息，可尝试用持有 Java 版的 Microsoft 账号重新登录。';
+  } else if (pathname === '/minecraft/profile' && status === 404) {
+    guidance = '。请在 Minecraft 官方启动器中完成 Java 版玩家资料创建。';
+  }
+  return new Error(`${stage}失败（HTTP ${status}）${guidance}`);
+}
+
+export function minecraftSkinUrl(value) {
+  return typeof value === 'string' && /^https?:\/\/textures\.minecraft\.net\/texture\/[a-f0-9]+$/i.test(value)
+    ? value.replace(/^http:/i, 'https:') : undefined;
 }
 
 export async function minecraftIdentity(microsoftToken, request = json) {
@@ -54,7 +82,7 @@ export async function minecraftIdentity(microsoftToken, request = json) {
   if (!/^[a-f0-9]{32}$/i.test(profile.id ?? '') || !profile.name) throw new Error('账号缺少有效的 Java 版玩家资料');
   const skin = profile.skins?.find(entry => entry.state === 'ACTIVE')?.url;
   return {
-    skin: /^https:\/\/textures\.minecraft\.net\/texture\/[a-f0-9]+$/i.test(skin ?? '') ? skin : undefined,
+    skin: minecraftSkinUrl(skin),
     id: profile.id, name: profile.name, access, expires: Date.now() + game.expires_in * 1000,
   };
 }

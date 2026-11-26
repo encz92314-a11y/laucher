@@ -93,7 +93,13 @@ function openWindow() {
     const closed = new Promise(resolve => login.once('closed', resolve));
     login.close();
     await closed;
-    app.exit(ready && canClose && abort.signal.aborted ? 0 : 1);
+    let opacityWorks = true;
+    if (process.platform !== 'linux') {
+      window.setOpacity(.7);
+      opacityWorks = Math.abs(window.getOpacity() - .7) < .02;
+      window.setOpacity(1);
+    }
+    app.exit(ready && canClose && abort.signal.aborted && opacityWorks ? 0 : 1);
   }).catch(error => {
     console.error(error);
     if (process.argv.includes('--smoke-test')) app.exit(1);
@@ -105,15 +111,11 @@ app.whenReady().then(() => {
   const root = join(app.getPath('userData'), 'launcher-data');
   const service = launcher(root);
   const appearance = appearanceStore(root);
-  let materialWindow;
-  let material;
   function updateMaterial(values) {
-    if (process.platform === 'darwin' && window && !window.isDestroyed()) {
-      const next = values.style === 'glass' && values.opacity > 0 ? 'under-window' : null;
-      if (materialWindow === window && material === next) return;
-      window.setVibrancy(next);
-      materialWindow = window;
-      material = next;
+    if (!window || window.isDestroyed()) return;
+    if (process.platform !== 'linux') window.setOpacity(values.windowOpacity / 100);
+    if (process.platform === 'darwin') {
+      window.setVibrancy(values.style === 'glass' && values.windowOpacity === 100 ? 'under-window' : null);
     }
   }
   const resources = modrinth();
@@ -127,7 +129,12 @@ app.whenReady().then(() => {
   }
   let skinSelection;
   const accounts = accountStore(root, safeStorage);
-  const publicAccount = value => ({ name: value.name, skin: value.skin, offline: !!value.offline });
+  const sessions = new Map();
+  const publicAccount = value => ({ id: value.id, name: value.name, skin: value.skin, offline: !!value.offline });
+  async function rememberAccount(value) {
+    sessions.set(value.id, value);
+    await accounts.remember(value).catch(() => false);
+  }
   let pending;
   let relay = { state: 'idle' };
   const relayDirectory = instance => localPath(directory(instance), 'network/e4mc');
@@ -161,7 +168,7 @@ app.whenReady().then(() => {
     async appearance() {
       const state = await appearance.load();
       updateMaterial(state.values);
-      return state;
+      return { ...state, nativeOpacity: process.platform !== 'linux' };
     },
     appearancePreview(_, values) { updateMaterial(validateAppearance(values)); },
     async saveAppearance(_, values) {
@@ -179,7 +186,15 @@ app.whenReady().then(() => {
       const { width, height } = image.getSize();
       const scaled = Math.max(width, height) <= 2560 ? image
         : image.resize(width >= height ? { width: 2560 } : { height: 2560 });
-      return appearance.storeImage(scaled.toJPEG(86));
+      return 'data:image/jpeg;base64,' + scaled.toJPEG(90).toString('base64');
+    },
+    async saveWallpaperCrop(jpeg) {
+      if (typeof jpeg !== 'string' || jpeg.length > 6 * 1024 * 1024 ||
+          !/^data:image\/jpeg;base64,[a-z0-9+/=]+$/i.test(jpeg)) throw new Error('此裁剪图片无法保存');
+      const image = nativeImage.createFromDataURL(jpeg);
+      const { width, height } = image.getSize();
+      if (image.isEmpty() || width > 2560 || height > 2560) throw new Error('此裁剪图片无法保存');
+      return appearance.storeImage(image.toJPEG(90));
     },
     async resetAppearanceImage() { await appearance.removeImage(); },
     async openWallpapers() { await shell.openExternal('https://www.minecraft.net/en-us/collectibles'); },
@@ -306,13 +321,32 @@ app.whenReady().then(() => {
       try {
         if (account.expires < Date.now() + 30_000) account = await refreshSignIn(account);
         account.skin = await applyOnlineSkin(account.access, selected, variant);
-        await accounts.remember(account).catch(() => false);
+        await rememberAccount(account);
         return publicAccount(account);
       } finally { signingIn = false; }
     },
     async accountSettings() {
       return { clientId: await accounts.clientId(), redirect: registeredRedirect };
     },
+    async listAccounts() {
+      const roster = new Map((await accounts.list()).map(value => [value.id, value]));
+      for (const [key, value] of sessions) roster.set(key, value);
+      return [...roster.values()].map(publicAccount);
+    },
+    async switchAccount(_, id) {
+      if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
+      signingIn = true;
+      try {
+        let target = sessions.get(id) ?? (await accounts.list()).find(value => value.id === id);
+        if (!target) throw new Error('找不到该账号，请重新登录');
+        if (!(target.expires > Date.now() + 30_000)) target = await refreshSignIn(target);
+        if (target.id !== id) throw new Error('微软返回了不同的账号，请重新登录');
+        account = target;
+        await rememberAccount(target);
+        return publicAccount(account);
+      } finally { signingIn = false; }
+    },
+    openMinecraftApproval: () => shell.openExternal('https://aka.ms/mce-reviewappid'),
     copyMicrosoftRedirect: () => clipboard.writeText(registeredRedirect),
     async signIn(_, clientId, external) {
       if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
@@ -327,7 +361,7 @@ app.whenReady().then(() => {
           login = authorizationWindow(callback, abort);
           await login.loadURL(url);
         }, abort.signal);
-        await accounts.remember(account).catch(() => false);
+        await rememberAccount(account);
         return publicAccount(account);
       } finally {
         if (login && !login.isDestroyed()) login.close();
@@ -341,7 +375,10 @@ app.whenReady().then(() => {
     },
     async signOut() {
       if (signingIn || starting || game) throw new Error('请等待当前登录或游戏任务结束');
-      await accounts.forget();
+      if (account && !account.offline) {
+        await accounts.forget(account.id);
+        sessions.delete(account.id);
+      }
       account = undefined;
     },
     async play(event, id, host = false, joinAddress) {
@@ -353,7 +390,7 @@ app.whenReady().then(() => {
         if (!instance) throw new Error('请先安装此游戏实例');
         if (account && !account.offline && account.expires < Date.now() + 30_000) {
           account = await refreshSignIn(account);
-          await accounts.remember(account).catch(() => false);
+          await rememberAccount(account);
         }
         if ((host || joinAddress !== undefined) && (!account || account.offline)) throw new Error('联机请先登录 Microsoft');
         let network;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { resolve, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
-import { minecraftIdentity } from '../desktop/account.mjs';
+import { authenticationError, minecraftIdentity, minecraftSkinUrl } from '../desktop/account.mjs';
 import { launchArguments } from '../desktop/game.mjs';
 
 test('Minecraft authentication validates ownership before obtaining profile', async () => {
@@ -48,4 +48,13 @@ test('builds classpath using the active platform separator and preserves argumen
     'example.Main', '--username', 'TestPlayer', '--gameDir', root,
   ]);
   assert.throws(() => launchArguments({ ...version, arguments: undefined }, root, {}), /旧版启动参数/);
+});
+
+test('Minecraft authorization and entitlement errors are distinct and skin links stay on Mojang', () => {
+  assert.match(authenticationError('https://api.minecraftservices.com/authentication/login_with_xbox', 403).message,
+    /应用授权失败.*Minecraft API 访问批准/);
+  assert.match(authenticationError('https://api.minecraftservices.com/entitlements/mcstore', 403).message,
+    /所有权检查失败/);
+  assert.equal(minecraftSkinUrl('http://textures.minecraft.net/texture/a123'), 'https://textures.minecraft.net/texture/a123');
+  assert.equal(minecraftSkinUrl('https://textures.minecraft.net.attacker.test/texture/a123'), undefined);
 });

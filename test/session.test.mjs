@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -35,6 +35,14 @@ test('protected Microsoft profile survives restart and local offline names omit 
   assert.equal(await accounts.remember(profile), true);
   assert.doesNotMatch(await readFile(join(root, 'verified-account.json'), 'utf8'), /secret-test-refresh|TestPlayer/);
   assert.equal((await accountStore(root, storage).saved()).id, profile.id);
+  // Upgrade a single-account vault from Zephyr 0.2.x.
+  const protectedProfile = storage.encryptString(JSON.stringify(profile)).toString('base64');
+  await writeFile(join(root, 'verified-account.json'), JSON.stringify({ protected: protectedProfile }));
+  const alternate = { ...profile, id: 'b'.repeat(32), name: 'AlternatePlayer' };
+  await accounts.remember(alternate);
+  assert.deepEqual((await accountStore(root, storage).list()).map(value => value.id), [alternate.id, profile.id]);
+  await accounts.forget(alternate.id);
+  assert.deepEqual((await accounts.list()).map(value => value.id), [profile.id]);
   const offline = offlineAccount('TestPlayer');
   assert.match(offline.id, /^[a-f0-9]{32}$/);
   assert.notEqual(offline.id, profile.id);

@@ -26,15 +26,24 @@ import { readableError } from './errors';
 type Loader = 'vanilla' | 'fabric';
 type InstallFile = { title: string; version: string };
 type Instance = { loader?: Loader; id: string; name: string; version: string; installed: boolean };
-type Player = { name: string; skin?: string; offline: boolean };
+type Player = { id: string; name: string; skin?: string; offline: boolean };
 type Version = { id: string; type: string };
 type Progress = { completed: number; total: number; bytesPerSecond: number };
+function Avatar({ player }: { player: Player }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [player.skin]);
+  return <span className="avatar" aria-hidden="true">
+    {player.skin && !failed ? <img onError={() => setFailed(true)} src={player.skin} alt="" /> : player.name.slice(0, 1).toUpperCase()}
+  </span>;
+}
+
 declare global {
   interface Window {
     launcher: {
-      appearance(): Promise<{ values: Appearance; image?: string }>;
+      appearance(): Promise<{ values: Appearance; image?: string; nativeOpacity: boolean }>;
       appearancePreview(values: Appearance): Promise<void>;
       saveAppearance(values: Appearance): Promise<void>;
+      saveWallpaperCrop(jpeg: string): Promise<string>;
       pickWallpaper(): Promise<string | null>;
       resetAppearanceImage(): Promise<void>;
       openWallpapers(): Promise<void>;
@@ -61,6 +70,9 @@ declare global {
       installMod(id: string, token: string): Promise<InstallFile[]>;
       install(id: string): Promise<Instance[]>;
       accountSettings(): Promise<{ clientId: string; redirect: string }>;
+      listAccounts(): Promise<Player[]>;
+      switchAccount(id: string): Promise<Player>;
+      openMinecraftApproval(): Promise<void>;
       copyMicrosoftRedirect(): Promise<void>;
       signIn(clientId: string, external?: boolean): Promise<Player>;
       relayStatus(): Promise<RelayState>;
@@ -78,6 +90,8 @@ declare global {
 }
 
 function App() {
+  const [nativeOpacity, setNativeOpacity] = useState(false);
+  const [roster, setRoster] = useState<Player[]>([]);
   const [appearance, setAppearance] = useState(defaultAppearance);
   const [wallpaper, setWallpaper] = useState<string>();
   const [page, setPage] = useState<Page>('home');
@@ -124,7 +138,7 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    window.launcher.appearance().then(state => { setAppearance(state.values); setWallpaper(state.image); })
+    window.launcher.appearance().then(state => { setAppearance(state.values); setWallpaper(state.image); setNativeOpacity(state.nativeOpacity); })
       .catch(reason => setError(readableError(reason)));
   }, []);
 
@@ -134,6 +148,7 @@ function App() {
   }
 
   useEffect(() => {
+    window.launcher.listAccounts().then(setRoster).catch(reason => setError(readableError(reason)));
     window.launcher.accountSettings().then(settings => {
       setClientId(settings.clientId);
       setMicrosoftRedirect(settings.redirect);
@@ -187,6 +202,7 @@ function App() {
       if (mode === 'forget') {
         await window.launcher.signOut();
         setPlayer(undefined);
+        setRoster(await window.launcher.listAccounts());
       } else if (mode === 'offline') {
         setPlayer(await window.launcher.signInOffline(nickname));
         localStorage.setItem('nickname', nickname.trim());
@@ -194,6 +210,7 @@ function App() {
       } else {
         const account = await window.launcher.signIn(clientId.trim(), external);
         setPlayer(account);
+        setRoster(await window.launcher.listAccounts());
         setPage('home');
       }
     } catch (error) {
@@ -201,6 +218,18 @@ function App() {
     } finally {
       setBusy('');
     }
+  }
+
+  async function switchAccount(id: string) {
+    if (player?.id === id) return;
+    setBusy('正在验证并切换账号');
+    setError('');
+    try {
+      setPlayer(await window.launcher.switchAccount(id));
+      setRoster(await window.launcher.listAccounts());
+      setPage('home');
+    } catch (reason) { setError(readableError(reason)); }
+    finally { setBusy(''); }
   }
 
   async function play(host = false, address?: string) {
@@ -222,8 +251,9 @@ function App() {
   const supported = current?.loader === 'fabric' && current.installed;
   const transfer = resourceBusy || busy === '正在安装游戏文件';
   return <div className="layout" data-reduced={hardware?.reducedEffects ?? false}
-    data-style={appearance.style} data-accent={appearance.accent} data-transparent={appearance.opacity === 0}
-    style={{ '--surface-opacity': appearance.opacity + '%', '--custom-accent': appearance.customColor } as CSSProperties}>
+    data-style={appearance.style} data-accent={appearance.accent}
+    style={{ opacity: nativeOpacity ? undefined : appearance.windowOpacity / 100,
+      '--custom-accent': appearance.customColor } as CSSProperties}>
     {wallpaper && appearance.wallpaper && <img className="wallpaper" alt="" src={wallpaper} style={{ opacity: appearance.imageOpacity / 100 }} />}
     <aside>
       <header><img src="./launcher-mark.png" alt="" /><strong>Zephyr<br /><small>Minecraft 启动器</small></strong></header>
@@ -244,10 +274,9 @@ function App() {
         <label className="theme">主题<select value={theme} onChange={event => setTheme(event.target.value)}>
           <option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
         </select></label>
-        {player && <span className="player">{player.skin && <span className="avatar"><img src={player.skin} alt="" /></span>}{player.name}{player.offline && <small>离线</small>}</span>}
-        <button type="button" disabled={locked} onClick={() => setPage('account')}>
-          {player ? '账号设置' : '登录'}
-        </button>
+        {player ? <button className="player account-trigger" type="button" disabled={locked} onClick={() => setPage('account')}>
+          <Avatar player={player} /><span>{player.name}</span><small>{player.offline ? '离线' : '正版'}</small>
+        </button> : <button type="button" disabled={locked} onClick={() => setPage('account')}>{roster.length ? '选择账号' : '登录'}</button>}
       </div>
       <div key={page} className="page">
       {page === 'home' && <section className="hero">
@@ -266,12 +295,19 @@ function App() {
       </section>}
       {page === 'account' && <>
         <section className="panel">
-          <h2>登录 Zephyr</h2>
+          <h2>账号</h2>
+          {!!roster.length && <div className="saved-accounts" aria-label="已添加的正版账号">
+            {roster.map(saved => <button type="button" key={saved.id} aria-pressed={player?.id === saved.id}
+              onClick={() => void switchAccount(saved.id)} disabled={locked}>
+              <Avatar player={saved} /> <strong>{saved.name}</strong>
+              <small>{player?.id === saved.id ? '当前账号' : '切换'}</small>
+            </button>)}
+          </div>}
           <p>用 Microsoft 账号登录时，密码只在微软官方网站输入。</p>
           <button className="primary" disabled={locked} onClick={() => {
             if (clientId.trim()) void changeAccount('online');
             else { setConfigureMicrosoft(true); setError('首次使用需要设置 Minecraft Services 已授权的应用客户端 ID。'); }
-          }}>打开 Microsoft 登录窗口</button>
+          }}>{player && !player.offline ? '添加 Microsoft 账号' : '打开 Microsoft 登录窗口'}</button>
           {clientId.trim() && <button className="secondary" disabled={locked}
             onClick={() => void changeAccount('online', true)}>使用系统浏览器</button>}
           <details open={configureMicrosoft || undefined}>
@@ -297,11 +333,14 @@ function App() {
               <button disabled={locked || !nickname.trim()}>离线进入</button>
             </form>
           </div>
-          {player && <div className="quick-actions"><button disabled={locked} onClick={() => void changeAccount('forget')}>退出账号</button></div>}
+          {player && <div className="quick-actions"><button disabled={locked} onClick={() => void changeAccount('forget')}>退出当前账号</button></div>}
         </section>
         <Skins key={current?.id} instance={current?.installed ? current.id : undefined} current={player?.skin}
           online={!!player && !player.offline} disabled={locked}
-          update={skin => setPlayer(value => value ? { ...value, skin } : value)} />
+          update={skin => {
+            setPlayer(value => value ? { ...value, skin } : value);
+            setRoster(values => values.map(value => value.id === player?.id ? { ...value, skin } : value));
+          }} />
       </>}
       {page === 'appearance' && <AppearanceSettings values={appearance} image={wallpaper}
         update={changeAppearance} setImage={setWallpaper} />}
@@ -354,6 +393,9 @@ function App() {
           <progress aria-label="下载进度" value={progress.completed} max={progress.total} />
         </div>}
         {error && <p className="error" role="alert">{error}</p>}
+        {error.startsWith('Minecraft Services 应用授权失败（HTTP 403）') &&
+          <button type="button" onClick={() => void window.launcher.openMinecraftApproval().catch(reason => setError(readableError(reason)))}>
+            打开 Minecraft API 授权申请</button>}
       </div>}
     </main>
   </div>;
